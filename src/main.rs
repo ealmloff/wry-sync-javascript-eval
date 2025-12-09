@@ -5,7 +5,7 @@ use std::thread;
 use base64::Engine;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
-use slotmap::{DefaultKey, Key, SlotMap};
+use slotmap::{DefaultKey, Key, KeyData, SlotMap};
 use winit::event_loop::EventLoopProxy;
 use winit::{
     application::ApplicationHandler,
@@ -74,7 +74,44 @@ impl ApplicationHandler<JSThreadMessage> for State {
                         .body(vec![].into())
                         .map_err(|e| e.to_string())
                         .expect("Failed to build response")
-                } else {
+                }
+                else if real_path == "callback" {
+                        if let Some(header_value) = request.headers().get("dioxus-data") {
+                            println!("Received header value for callback: {:?}", header_value);
+                            // Decode base64 header
+                            let engine = base64::engine::general_purpose::STANDARD;
+                            if let Ok(decoded_bytes) = engine.decode(header_value) {
+                                #[derive(Deserialize)]
+                                struct FunctionCall {
+                                    code: u64,
+                                    args: Vec<serde_json::Value>,
+                                }
+                                let function_call: FunctionCall = serde_json::from_slice(&decoded_bytes).unwrap();
+                                let mut encoder = EVENT_LOOP_PROXY
+                                    .get()
+                                    .expect("Event loop proxy not set")
+                                    .encoder
+                                    .write()
+                                    .unwrap();
+                                if let Some(func) = encoder.functions.get_mut(KeyData::from_ffi(function_call.code).into()) {
+                                    let result = func(function_call.args);
+                                    let serialized_result = serde_json::to_vec(&result).unwrap();
+                                    return wry::http::Response::builder()
+                                        .header("Content-Type", "application/xml")
+                                        .body(serialized_result.into())
+                                        .map_err(|e| e.to_string())
+                                        .expect("Failed to build response");
+                                }
+                            }
+                        }
+
+                    wry::http::Response::builder()
+                        .header("Content-Type", "application/xml")
+                        .body(vec![].into())
+                        .map_err(|e| e.to_string())
+                        .expect("Failed to build response")
+                }
+                else {
                     // Serve the main HTML page
                     let html = r#"<!DOCTYPE html>
 <html>
@@ -132,15 +169,43 @@ impl ApplicationHandler<JSThreadMessage> for State {
                 case 2:
                     f = function(a, b) { return a + b; };
                     break;
+                case 3:
+                    f = function(event_name, callback) {
+                        document.addEventListener(event_name, function(e) {
+                            callback.call();
+                        });
+                    };
+                    break;
                 default:
                     throw new Error("Unknown code: " + code);
             }
             return f.apply(null, args);
         }
 
-        function evaluate_from_rust(code, args) {
+        function evaluate_from_rust(code, args_json) {
+            let args = deserialize_args(args_json);
             const result = run_code(code, args);
             sync_request("wry://handler", result);
+        }
+
+        function deserialize_args(args_json) {
+            if (typeof args_json === "string") {
+                return args_json;
+            } else if (typeof args_json === "number") {
+                return args_json;
+            } else if (Array.isArray(args_json)) {
+                return args_json.map(deserialize_args);
+            } else if (typeof args_json === "object" && args_json !== null) {
+                if (args_json.type === "function") {
+                    return new RustFunction(args_json.id);
+                } else {
+                    const obj = {};
+                    for (const key in args_json) {
+                        obj[key] = deserialize_args(args_json[key]);
+                    }
+                    return obj;
+                }
+            }
         }
 
         class RustFunction {
@@ -149,7 +214,7 @@ impl ApplicationHandler<JSThreadMessage> for State {
             }
 
             call(...args) {
-                return sync_request("wry://handler", {
+                return sync_request("wry://callback", {
                     code: this.code,
                     args: args
                 });
@@ -238,7 +303,7 @@ impl ApplicationHandler<JSThreadMessage> for State {
 }
 
 struct DomEnv {
-    encoder: Encoder,
+    encoder: RwLock<Encoder>,
     proxy: EventLoopProxy<JSThreadMessage>,
 }
 
@@ -247,7 +312,7 @@ static EVENT_LOOP_PROXY: OnceLock<DomEnv> = OnceLock::new();
 fn set_event_loop_proxy(proxy: EventLoopProxy<JSThreadMessage>) {
     EVENT_LOOP_PROXY
         .set(DomEnv {
-            encoder: Encoder::new(),
+            encoder: RwLock::new(Encoder::new()),
             proxy,
         })
         .unwrap_or_else(|_| panic!("Event loop proxy already set"));
@@ -293,15 +358,14 @@ fn main() -> wry::Result<()> {
 }
 
 fn app() {
-    let function = JSFunction::<fn(String) -> String>::new(0);
-    // let result: String = function.call("Hello from Rust!".to_string());
-    // println!("Result from JS: {}", result);
-    // let alert_function = ALERT;;
-    // alert_function.call("This is an alert from Rust!".to_string());
     let add_function = ADD_NUMBERS;
     let sum: i32 = add_function.call(5, 7);
     println!("Sum from JS: {}", sum);
     assert_eq!(sum, 12);
+    let add_event_listener = ADD_EVENT_LISTENER;
+    add_event_listener.call("click".to_string(), || {
+        println!("Button clicked!");
+    });
 }
 
 struct Encoder {
@@ -318,14 +382,11 @@ impl Encoder {
         }
     }
 
-    fn encode<T: RustEncode>(&mut self, value: T) -> serde_json::Value {
+    fn encode<T: RustEncode<P>, P>(&mut self, value: T) -> serde_json::Value {
         value.encode(self)
     }
 
-    fn encode_function<T: IntoRustCallable<P>, P>(
-        &mut self,
-        function: T,
-    ) -> serde_json::Value {
+    fn encode_function<T: IntoRustCallable<P>, P>(&mut self, function: T) -> serde_json::Value {
         let key = self.functions.insert(function.into());
         serde_json::json!({
             "type": "function",
@@ -344,13 +405,22 @@ impl RustEncode for String {
     }
 }
 
+impl RustEncode for () {
+    fn encode(self, _encoder: &mut Encoder) -> serde_json::Value {
+        serde_json::Value::Null
+    }
+}
+
 impl RustEncode for i32 {
     fn encode(self, _encoder: &mut Encoder) -> serde_json::Value {
         serde_json::Value::Number(serde_json::Number::from(self))
     }
 }
 
-impl<F, P> RustEncode<P> for F where F: IntoRustCallable<P> {
+impl<F, P> RustEncode<P> for F
+where
+    F: IntoRustCallable<P>,
+{
     fn encode(self, encoder: &mut Encoder) -> serde_json::Value {
         encoder.encode_function(self)
     }
@@ -360,7 +430,20 @@ trait IntoRustCallable<T> {
     fn into(self) -> Box<dyn FnMut(Vec<serde_json::Value>) -> serde_json::Value + Send + Sync>;
 }
 
-impl<T, R, F> IntoRustCallable<(T, R)> for F
+impl<R, F> IntoRustCallable<fn() -> R> for F
+where
+    F: FnMut() -> R + Send + Sync + 'static,
+    R: serde::Serialize,
+{
+    fn into(mut self) -> Box<dyn FnMut(Vec<serde_json::Value>) -> serde_json::Value + Send + Sync> {
+        Box::new(move |args: Vec<serde_json::Value>| {
+            let result: R = (self)();
+            serde_json::to_value(result).unwrap()
+        })
+    }
+}
+
+impl<T, R, F> IntoRustCallable<fn(T) -> R> for F
 where
     F: FnMut(T) -> R + Send + Sync + 'static,
     T: for<'de> Deserialize<'de>,
@@ -376,7 +459,7 @@ where
     }
 }
 
-impl<T1, T2, R, F> IntoRustCallable<(T1, T2, R)> for F
+impl<T1, T2, R, F> IntoRustCallable<fn(T1, T2) -> R> for F
 where
     F: FnMut(T1, T2) -> R + Send + Sync + 'static,
     T1: for<'de> Deserialize<'de>,
@@ -394,9 +477,10 @@ where
     }
 }
 
-const CONSOLE_LOG: JSFunction<fn(String) -> ()> = JSFunction::new(0);
-const ALERT: JSFunction<fn(String) -> ()> = JSFunction::new(1);
+const CONSOLE_LOG: JSFunction<fn(String)> = JSFunction::new(0);
+const ALERT: JSFunction<fn(String)> = JSFunction::new(1);
 const ADD_NUMBERS: JSFunction<fn(i32, i32) -> i32> = JSFunction::new(2);
+const ADD_EVENT_LISTENER: JSFunction<fn(String, fn())> = JSFunction::new(3);
 
 struct JSFunction<T> {
     id: u32,
@@ -413,35 +497,44 @@ impl<T> JSFunction<T> {
 }
 
 impl<T, R> JSFunction<fn(T) -> R> {
-    fn call(&self, args: T) -> R
+    fn call<P>(&self, args: T) -> R
     where
-        T: serde::Serialize,
+        T: RustEncode<P>,
         R: DeserializeOwned,
     {
-        let args_json = serde_json::to_string(&args).unwrap();
-        let code = format_call(self.id, std::iter::once(args_json.as_str()));
+        let mut encoder = EVENT_LOOP_PROXY
+            .get()
+            .expect("Event loop proxy not set")
+            .encoder
+            .write()
+            .unwrap();
+        let args_json = encoder.encode(args);
+        let code = format_call(self.id, std::iter::once(args_json));
         run_js_sync(get_event_loop_proxy(), code)
     }
 }
 
 impl<T1, T2, R> JSFunction<fn(T1, T2) -> R> {
-    fn call(&self, arg1: T1, arg2: T2) -> R
+    fn call<P1, P2>(&self, arg1: T1, arg2: T2) -> R
     where
-        T1: serde::Serialize,
-        T2: serde::Serialize,
+        T1: RustEncode<P1>,
+        T2: RustEncode<P2>,
         R: DeserializeOwned,
     {
-        let arg1_json = serde_json::to_string(&arg1).unwrap();
-        let arg2_json = serde_json::to_string(&arg2).unwrap();
-        let code = format_call(
-            self.id,
-            vec![arg1_json.as_str(), arg2_json.as_str()].into_iter(),
-        );
+        let mut encoder = EVENT_LOOP_PROXY
+            .get()
+            .expect("Event loop proxy not set")
+            .encoder
+            .write()
+            .unwrap();
+        let arg1_json = encoder.encode(arg1);
+        let arg2_json = encoder.encode(arg2);
+        let code = format_call(self.id, [arg1_json, arg2_json].into_iter());
         run_js_sync(get_event_loop_proxy(), code)
     }
 }
 
-fn format_call<'a>(function_id: u32, args: impl Iterator<Item = &'a str>) -> String {
+fn format_call<'a>(function_id: u32, args: impl Iterator<Item = serde_json::Value>) -> String {
     let mut call = String::new();
     call.push_str("evaluate_from_rust(");
     call.push_str(&function_id.to_string());
@@ -450,7 +543,7 @@ fn format_call<'a>(function_id: u32, args: impl Iterator<Item = &'a str>) -> Str
         if i > 0 {
             call.push_str(", ");
         }
-        call.push_str(arg);
+        call.push_str(&arg.to_string());
     }
     call.push_str("])");
     call
@@ -465,6 +558,9 @@ fn run_js_sync<T: DeserializeOwned>(proxy: &EventLoopProxy<JSThreadMessage>, cod
         })
         .unwrap();
 
-    let result_bytes = result_receiver.recv().unwrap();
+    let mut result_bytes = result_receiver.recv().unwrap();
+    if result_bytes.is_empty() {
+        result_bytes = b"null".to_vec();
+    }
     serde_json::from_slice(&result_bytes).unwrap()
 }
