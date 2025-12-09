@@ -50,7 +50,14 @@ impl ApplicationHandler for State {
             WindowEvent::CloseRequested => {
                 std::process::exit(0);
             }
-            _ => {}
+            WindowEvent::CursorEntered { device_id } => {
+                let webview = self.webview.as_ref().unwrap();
+                webview.evaluate_script_with_callback("12345", |s| println!("finished {s}"));
+                println!("done");
+            }
+            _ => {
+                // println!("got event\n{:#?}", event);
+            }
         }
     }
 
