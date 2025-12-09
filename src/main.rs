@@ -359,12 +359,16 @@ fn main() -> wry::Result<()> {
 
 fn app() {
     let add_function = ADD_NUMBERS;
-    let sum: i32 = add_function.call(5, 7);
-    println!("Sum from JS: {}", sum);
-    assert_eq!(sum, 12);
-    let add_event_listener = ADD_EVENT_LISTENER;
-    add_event_listener.call("click".to_string(), || {
+    let assert_sum_works = move || {
+        let sum: i32 = add_function.call(5, 7);
+        println!("Sum from JS: {}", sum);
+        assert_eq!(sum, 12);
+    };
+    assert_sum_works();
+    let add_event_listener: JSFunction<fn(_, _)> = JSFunction::new(3);
+    add_event_listener.call("click".to_string(), move || {
         println!("Button clicked!");
+        assert_sum_works();
     });
 }
 
