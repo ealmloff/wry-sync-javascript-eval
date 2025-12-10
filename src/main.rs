@@ -18,9 +18,8 @@ use wry::{Rect, RequestAsyncResponder, WebViewBuilder};
 // Message types for thread communication
 enum IPCMessage {
     Evaluate {
-        fn_id: u32,
+        fn_id: u64,
         args: Vec<serde_json::Value>,
-        result_sender: mpsc::Sender<Vec<u8>>,
     },
     Respond {
         id: DefaultKey,
@@ -78,18 +77,23 @@ fn decode_request_data(request: &wry::http::Request<Vec<u8>>) -> Option<Vec<u8>>
 
 #[derive(Default)]
 struct SharedWebviewState {
-    pending_requests: SlotMap<DefaultKey, mpsc::Sender<Vec<u8>>>,
+    pending_requests: SlotMap<DefaultKey, ()>,
     ongoing_requests: SlotMap<DefaultKey, OngoingRustCall>,
 }
 
 impl SharedWebviewState {
-    fn push_pending_request(&mut self, sender: mpsc::Sender<Vec<u8>>) -> DefaultKey {
-        self.pending_requests.insert(sender)
+    fn push_pending_request(&mut self) -> DefaultKey {
+        self.pending_requests.insert(())
     }
 
     fn finish_pending_request(&mut self, id: DefaultKey, response: Vec<u8>) {
-        if let Some(sender) = self.pending_requests.remove(id) {
-            _ = sender.send(response)
+        if let Some(_) = self.pending_requests.remove(id) {
+            EVENT_LOOP_PROXY.get()
+                .expect("Event loop proxy not set")
+                .queue_rust_call(IPCMessage::Respond {
+                    id,
+                    response: ResponseOrCall::Response(serde_json::from_slice::<serde_json::Value>(&response).unwrap()),
+                });
         }
     }
 
@@ -182,10 +186,10 @@ impl ApplicationHandler<IPCMessage> for State {
                 } else if real_path == "callback" {
                     EVENT_LOOP_PROXY.get()
                         .expect("Event loop proxy not set")
-                        .queue_rust_call(ResponseOrCall::Call {
-                            code: id.data().as_ffi(),
+                        .queue_rust_call(IPCMessage::Evaluate {
+                            fn_id: id.data().as_ffi(),
                             args: serde_json::from_slice::<Vec<serde_json::Value>>(&data)
-                                .unwrap(),
+                                .unwrap()
                         });
                 }
             })
@@ -230,11 +234,10 @@ impl ApplicationHandler<IPCMessage> for State {
             IPCMessage::Evaluate {
                 fn_id,
                 args,
-                result_sender,
             } => {
                 fn format_call<'a>(
                     req_id: u64,
-                    function_id: u32,
+                    function_id: u64,
                     args: impl Iterator<Item = serde_json::Value>,
                 ) -> String {
                     let mut call = String::new();
@@ -256,7 +259,7 @@ impl ApplicationHandler<IPCMessage> for State {
                     .shared
                     .write()
                     .unwrap()
-                    .push_pending_request(result_sender);
+                    .push_pending_request();
                 let code = format_call(id.data().as_ffi(), fn_id, args.into_iter());
                 self.webview
                     .as_ref()
@@ -294,8 +297,8 @@ impl ApplicationHandler<IPCMessage> for State {
 
 struct DomEnv {
     proxy: EventLoopProxy<IPCMessage>,
-    queued_rust_calls: RwLock<Vec<ResponseOrCall>>,
-    sender: RwLock<Option<Sender<ResponseOrCall>>>,
+    queued_rust_calls: RwLock<Vec<IPCMessage>>,
+    sender: RwLock<Option<Sender<IPCMessage>>>,
 }
 
 impl DomEnv {
@@ -307,7 +310,11 @@ impl DomEnv {
         }
     }
 
-    fn queue_rust_call(&self, responder: ResponseOrCall) {
+    fn js_response(&self, responder: IPCMessage) {
+        let _ = self.proxy.send_event(responder);
+    }
+
+    fn queue_rust_call(&self, responder: IPCMessage) {
         if let Some(sender) = self.sender.read().unwrap().as_ref() {
             let _ = sender.send(responder);
         } else {
@@ -315,7 +322,7 @@ impl DomEnv {
         }
     }
 
-    fn set_sender(&self, sender: Sender<ResponseOrCall>) {
+    fn set_sender(&self, sender: Sender<IPCMessage>) {
         let mut queued = self.queued_rust_calls.write().unwrap();
         *self.sender.write().unwrap() = Some(sender);
         for call in queued.drain(..) {
@@ -330,11 +337,18 @@ static EVENT_LOOP_PROXY: OnceLock<DomEnv> = OnceLock::new();
 
 struct ThreadLocalEncoder {
     encoder: RwLock<Encoder>,
+    receiver: Receiver<IPCMessage>,
 }
 
 thread_local! {
     static THREAD_LOCAL_ENCODER: ThreadLocalEncoder = ThreadLocalEncoder {
         encoder: RwLock::new(Encoder::new()),
+        receiver: {
+            let env = EVENT_LOOP_PROXY.get().expect("Event loop proxy not set");
+            let (sender, receiver) = mpsc::channel();
+            env.set_sender(sender);
+            receiver
+        },
     };
 }
 
@@ -520,12 +534,12 @@ const ADD_NUMBERS: JSFunction<fn(i32, i32) -> i32> = JSFunction::new(2);
 const ADD_EVENT_LISTENER: JSFunction<fn(String, fn())> = JSFunction::new(3);
 
 struct JSFunction<T> {
-    id: u32,
+    id: u64,
     function: PhantomData<T>,
 }
 
 impl<T> JSFunction<T> {
-    const fn new(id: u32) -> Self {
+    const fn new(id: u64) -> Self {
         Self {
             id,
             function: PhantomData,
@@ -559,21 +573,42 @@ impl<T1, T2, R> JSFunction<fn(T1, T2) -> R> {
 
 fn run_js_sync<T: DeserializeOwned>(
     proxy: &EventLoopProxy<IPCMessage>,
-    fn_id: u32,
+    fn_id: u64,
     args: Vec<serde_json::Value>,
 ) -> T {
-    let (result_sender, result_receiver) = mpsc::channel();
     _ = proxy.send_event(IPCMessage::Evaluate {
         fn_id,
         args,
-        result_sender,
     });
 
-    let mut result_bytes = result_receiver.recv().unwrap();
-    if result_bytes.is_empty() {
-        result_bytes = b"null".to_vec();
-    }
-    serde_json::from_slice(&result_bytes).unwrap()
+    wait_for_js_event()
+}
+
+fn wait_for_js_event<T: DeserializeOwned>() -> T {
+    let env = EVENT_LOOP_PROXY.get().expect("Event loop proxy not set");
+    THREAD_LOCAL_ENCODER.with(|tle| {
+        while let Some(response) = tle.receiver.try_recv().ok() {
+            match response {
+                IPCMessage::Respond { id: _, response: ResponseOrCall::Response(response) } => {
+                    return serde_json::from_value(response).unwrap();
+                }
+                IPCMessage::Respond { id: _, response: ResponseOrCall::Call { code: fn_id, args } } | IPCMessage::Evaluate { fn_id, args } => {
+                    let mut encoder = tle.encoder.write().unwrap();
+                    if let Some(function) = encoder.functions.get_mut(KeyData::from_ffi(fn_id).into()) {
+                        let result = function(args);
+                        env.js_response(IPCMessage::Respond {
+                            id: KeyData::from_ffi(fn_id).into(),
+                            response: ResponseOrCall::Response(result),
+                        });
+                    }
+                }
+                IPCMessage::Shutdown => {
+                    panic!()
+                }
+            }
+        }
+        panic!()
+    })
 }
 
 fn root_response() -> wry::http::Response<Vec<u8>> {
