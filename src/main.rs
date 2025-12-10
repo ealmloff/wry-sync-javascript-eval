@@ -1,7 +1,7 @@
 use base64::Engine;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use slotmap::{DefaultKey, Key, KeyData, SlotMap};
+use slotmap::{DefaultKey, Key, KeyData, SecondaryMap, SlotMap};
 use std::marker::PhantomData;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, OnceLock, RwLock, mpsc};
@@ -16,14 +16,14 @@ use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::{Rect, RequestAsyncResponder, WebViewBuilder};
 
 // Message types for thread communication
+#[derive(Serialize, Deserialize, Debug)]
 enum IPCMessage {
     Evaluate {
         fn_id: u64,
         args: Vec<serde_json::Value>,
     },
     Respond {
-        id: DefaultKey,
-        response: ResponseOrCall,
+        response: serde_json::Value,
     },
     Shutdown,
 }
@@ -55,15 +55,6 @@ struct OngoingRustCall {
     responder: RequestAsyncResponder,
 }
 
-#[derive(Serialize, Deserialize)]
-enum ResponseOrCall {
-    Response(serde_json::Value),
-    Call {
-        code: u64,
-        args: Vec<serde_json::Value>,
-    },
-}
-
 fn decode_request_data(request: &wry::http::Request<Vec<u8>>) -> Option<Vec<u8>> {
     if let Some(header_value) = request.headers().get("dioxus-data") {
         // Decode base64 header
@@ -76,54 +67,55 @@ fn decode_request_data(request: &wry::http::Request<Vec<u8>>) -> Option<Vec<u8>>
 }
 
 #[derive(Default)]
+enum OngoingRequestState {
+    Pending(RequestAsyncResponder),
+    Querying,
+    #[default]
+    Completed,
+}
+
+impl OngoingRequestState {
+    fn take(&mut self) -> OngoingRequestState {
+        std::mem::replace(self, OngoingRequestState::Completed)
+    }
+}
+
+#[derive(Default)]
 struct SharedWebviewState {
-    pending_requests: SlotMap<DefaultKey, ()>,
-    ongoing_requests: SlotMap<DefaultKey, OngoingRustCall>,
+    ongoing_request: OngoingRequestState,
 }
 
 impl SharedWebviewState {
-    fn push_pending_request(&mut self) -> DefaultKey {
-        self.pending_requests.insert(())
-    }
-
-    fn finish_pending_request(&mut self, id: DefaultKey, response: Vec<u8>) {
-        if let Some(_) = self.pending_requests.remove(id) {
-            EVENT_LOOP_PROXY.get()
-                .expect("Event loop proxy not set")
-                .queue_rust_call(IPCMessage::Respond {
-                    id,
-                    response: ResponseOrCall::Response(serde_json::from_slice::<serde_json::Value>(&response).unwrap()),
-                });
+    fn finish_pending_request(&mut self, response: Vec<u8>) {
+        println!("response as string: {}", String::from_utf8_lossy(&response));
+        match serde_json::from_slice::<IPCMessage>(&response) {
+            Ok(msg) => {
+                EVENT_LOOP_PROXY
+                    .get()
+                    .expect("Event loop proxy not set")
+                    .queue_rust_call(msg);
+            }
+            Err(e) => println!("Failed to decode IPCMessage: {}", e),
         }
     }
 
-    fn push_ongoing_request(&mut self, ongoing: OngoingRustCall) -> DefaultKey {
-        self.ongoing_requests.insert(ongoing)
+    fn push_ongoing_request(&mut self, ongoing: OngoingRustCall) {
+        self.ongoing_request = OngoingRequestState::Pending(ongoing.responder);
     }
 
-    fn respond_to_request(&mut self, id: DefaultKey, response: ResponseOrCall) {
-        if let Some(ongoing) = self.ongoing_requests.remove(id) {
-            ongoing.responder.respond(match response {
-                ResponseOrCall::Response(value) => wry::http::Response::builder()
-                    .header("Content-Type", "application/xml")
-                    .body(serde_json::to_vec(&value).unwrap())
-                    .map_err(|e| e.to_string())
+    fn respond_to_request(&mut self, response: IPCMessage) {
+        if let OngoingRequestState::Pending(responder) = self.ongoing_request.take() {
+            if let IPCMessage::Evaluate { .. } = response {
+                self.ongoing_request = OngoingRequestState::Querying;
+            } else {
+                self.ongoing_request = OngoingRequestState::Completed;
+            }
+            responder.respond(
+                wry::http::Response::builder()
+                    .status(200)
+                    .body(serde_json::to_vec(&response).unwrap())
                     .expect("Failed to build response"),
-                ResponseOrCall::Call { code, args } => {
-                    let serialized_args = serde_json::to_vec(&args).unwrap();
-                    wry::http::Response::builder()
-                        .header("Content-Type", "application/xml")
-                        .body(
-                            serde_json::to_vec(&serde_json::json!({
-                                "code": code,
-                                "args": serde_json::from_slice::<serde_json::Value>(&serialized_args).unwrap(),
-                            }))
-                            .unwrap(),
-                        )
-                        .map_err(|e| e.to_string())
-                        .expect("Failed to build response")
-                }
-            });
+            );
         }
     }
 }
@@ -133,6 +125,13 @@ fn error_response() -> wry::http::Response<Vec<u8>> {
         .status(400)
         .body(vec![])
         .expect("Failed to build error response")
+}
+
+fn blank_response() -> wry::http::Response<Vec<u8>> {
+    wry::http::Response::builder()
+        .status(200)
+        .body(vec![])
+        .expect("Failed to build blank response")
 }
 
 #[derive(Default)]
@@ -154,48 +153,36 @@ impl ApplicationHandler<IPCMessage> for State {
                 // path is the string slice, request is the Request object
                 let real_path = request.uri().to_string().replace("wry://", "");
                 let real_path = real_path.as_str().trim_matches('/');
+                println!("Handling request for path: {}", real_path);
+                println!("Request: {:?}", request);
                 if real_path == "index" {
                     responder.respond(root_response());
                     return;
                 }
-                println!("Handling request for path: {}", real_path);
-                println!("Request: {:?}", request);
-                let id: Option<DefaultKey> = request
-                    .headers()
-                    .get("dioxus-request-id")
-                    .and_then(|v| {
-                        v.as_bytes()
-                            .iter()
-                            .map(|b| *b as char)
-                            .collect::<String>()
-                            .parse::<u64>()
-                            .ok()
-                    })
-                    .map(|v| KeyData::from_ffi(v).into());
-                let Some(id) = id else {
-                    responder.respond(error_response());
-                    return;
-                };
                 let mut shared = shared.write().unwrap();
                 let Some(data) = decode_request_data(&request) else {
                     responder.respond(error_response());
                     return;
                 };
                 if real_path == "handler" {
-                    shared.finish_pending_request(id, data);
+                    shared.finish_pending_request(data);
+                    return;
                 } else if real_path == "callback" {
-                    EVENT_LOOP_PROXY.get()
+                    EVENT_LOOP_PROXY
+                        .get()
                         .expect("Event loop proxy not set")
-                        .queue_rust_call(IPCMessage::Evaluate {
-                            fn_id: id.data().as_ffi(),
-                            args: serde_json::from_slice::<Vec<serde_json::Value>>(&data)
-                                .unwrap()
-                        });
+                        .queue_rust_call(serde_json::from_slice(&data).unwrap());
+                    shared.push_ongoing_request(OngoingRustCall { responder });
+                    return;
                 }
+
+                responder.respond(blank_response());
             })
             .with_url("wry://index")
             .build_as_child(&window)
             .unwrap();
+
+        webview.open_devtools();
 
         self.window = Some(window);
         self.webview = Some(webview);
@@ -229,53 +216,40 @@ impl ApplicationHandler<IPCMessage> for State {
         }
     }
 
-    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: IPCMessage) {
-        match event {
-            IPCMessage::Evaluate {
-                fn_id,
-                args,
-            } => {
-                fn format_call<'a>(
-                    req_id: u64,
-                    function_id: u64,
-                    args: impl Iterator<Item = serde_json::Value>,
-                ) -> String {
-                    let mut call = String::new();
-                    call.push_str("evaluate_from_rust(");
-                    call.push_str(&req_id.to_string());
-                    call.push_str(", ");
-                    call.push_str(&function_id.to_string());
-                    call.push_str(", [");
-                    for (i, arg) in args.enumerate() {
-                        if i > 0 {
-                            call.push_str(", ");
-                        }
-                        call.push_str(&arg.to_string());
+    fn user_event(&mut self, _: &ActiveEventLoop, event: IPCMessage) {
+        let shared = self.shared.read().unwrap();
+        match &shared.ongoing_request {
+            OngoingRequestState::Pending(_) => {
+                self.shared.write().unwrap().respond_to_request(event);
+                return;
+            }
+            _ => {}
+        }
+
+        if let IPCMessage::Evaluate { fn_id, args } = event {
+            fn format_call<'a>(
+                function_id: u64,
+                args: impl Iterator<Item = serde_json::Value>,
+            ) -> String {
+                let mut call = String::new();
+                call.push_str("evaluate_from_rust(");
+                call.push_str(&function_id.to_string());
+                call.push_str(", [");
+                for (i, arg) in args.enumerate() {
+                    if i > 0 {
+                        call.push_str(", ");
                     }
-                    call.push_str("])");
-                    call
+                    call.push_str(&arg.to_string());
                 }
-                let id = self
-                    .shared
-                    .write()
-                    .unwrap()
-                    .push_pending_request();
-                let code = format_call(id.data().as_ffi(), fn_id, args.into_iter());
-                self.webview
-                    .as_ref()
-                    .unwrap()
-                    .evaluate_script(&code)
-                    .unwrap();
+                call.push_str("])");
+                call
             }
-            IPCMessage::Respond { id, response } => {
-                self.shared
-                    .write()
-                    .unwrap()
-                    .respond_to_request(id, response);
-            }
-            IPCMessage::Shutdown => {
-                event_loop.exit();
-            }
+            let code = format_call(fn_id, args.into_iter());
+            self.webview
+                .as_ref()
+                .unwrap()
+                .evaluate_script(&code)
+                .unwrap();
         }
     }
 
@@ -412,6 +386,7 @@ fn app() {
         assert_eq!(sum, 12);
     };
     assert_sum_works();
+    println!("Setting up event listener...");
     let add_event_listener: JSFunction<fn(_, _)> = JSFunction::new(3);
     add_event_listener.call("click".to_string(), move || {
         println!("Button clicked!");
@@ -576,10 +551,7 @@ fn run_js_sync<T: DeserializeOwned>(
     fn_id: u64,
     args: Vec<serde_json::Value>,
 ) -> T {
-    _ = proxy.send_event(IPCMessage::Evaluate {
-        fn_id,
-        args,
-    });
+    _ = proxy.send_event(IPCMessage::Evaluate { fn_id, args });
 
     wait_for_js_event()
 }
@@ -587,19 +559,21 @@ fn run_js_sync<T: DeserializeOwned>(
 fn wait_for_js_event<T: DeserializeOwned>() -> T {
     let env = EVENT_LOOP_PROXY.get().expect("Event loop proxy not set");
     THREAD_LOCAL_ENCODER.with(|tle| {
+        println!("Waiting for JS response...");
         while let Some(response) = tle.receiver.recv().ok() {
+            println!("Received response: {:?}", response);
             match response {
-                IPCMessage::Respond { id: _, response: ResponseOrCall::Response(response) } => {
+                IPCMessage::Respond { response } => {
+                    println!("Got response from JS: {:?}", response);
                     return serde_json::from_value(response).unwrap();
                 }
-                IPCMessage::Respond { id: _, response: ResponseOrCall::Call { code: fn_id, args } } | IPCMessage::Evaluate { fn_id, args } => {
+                IPCMessage::Evaluate { fn_id, args } => {
                     let mut encoder = tle.encoder.write().unwrap();
-                    if let Some(function) = encoder.functions.get_mut(KeyData::from_ffi(fn_id).into()) {
+                    if let Some(function) =
+                        encoder.functions.get_mut(KeyData::from_ffi(fn_id).into())
+                    {
                         let result = function(args);
-                        env.js_response(IPCMessage::Respond {
-                            id: KeyData::from_ffi(fn_id).into(),
-                            response: ResponseOrCall::Response(result),
-                        });
+                        env.js_response(IPCMessage::Respond { response: result });
                     }
                 }
                 IPCMessage::Shutdown => {
@@ -620,16 +594,8 @@ fn root_response() -> wry::http::Response<Vec<u8>> {
 </head>
 <body>
     <h1>Wry Custom Protocol Test</h1>
-    <button onclick="testRequest()">Test XML Request</button>
-    <div id="result"></div>
 
     <script>
-        function testRequest() {
-            sync_request("wry://handler", { event: "test_event" })
-                .then(response => {
-                    document.getElementById("result").innerText = "Response: " + JSON.stringify(response);
-                });
-        }
         // This function sends the event to the virtualdom and then waits for the virtualdom to process it
         //
         // However, it's not really suitable for liveview, because it's synchronous and will block the main thread
@@ -651,10 +617,20 @@ fn root_response() -> wry::http::Response<Vec<u8>> {
             //
             // the issue here isn't that big, tbh, but there's a small chance we lose the event due to header max size (16k per header, 32k max)
             const json_string = JSON.stringify(contents);
+            console.log("Sending request to Rust:", json_string);
             const contents_bytes = new TextEncoder().encode(json_string);
             const contents_base64 = btoa(String.fromCharCode.apply(null, contents_bytes));
             xhr.setRequestHeader("dioxus-data", contents_base64);
             xhr.send();
+
+            const response_text = xhr.responseText;
+            console.log("Received response from Rust:", response_text);
+            try {
+                return JSON.parse(response_text);
+            } catch (e) {
+                console.error("Failed to parse response JSON:", e);
+                return null;
+            }
         }
 
         function run_code(code, args) {
@@ -682,14 +658,16 @@ fn root_response() -> wry::http::Response<Vec<u8>> {
             return f.apply(null, args);
         }
 
-        function evaluate_from_rust(id, code, args_json) {
+        function evaluate_from_rust(code, args_json) {
             let args = deserialize_args(args_json);
             const result = run_code(code, args);
             const response = {
-                id,
-                result: result
+                Respond: {
+                    response: result || null
+                }
             };
-            sync_request("wry://handler", response);
+            const request_result = sync_request("wry://handler", response);
+            return handleResponse(request_result);
         }
 
         function deserialize_args(args_json) {
@@ -712,16 +690,31 @@ fn root_response() -> wry::http::Response<Vec<u8>> {
             }
         }
 
+        function handleResponse(response) {
+            console.log("Handling response:", response);
+            if (response.Respond) {
+                return response.Respond.response;
+            } else if (response.Evaluate) {
+                return evaluate_from_rust(response.Evaluate.fn_id, response.Evaluate.args);
+            }
+            else {
+                throw new Error("Unknown response type");
+            }
+        }
+
         class RustFunction {
             constructor(code) {
                 this.code = code;
             }
 
             call(...args) {
-                return sync_request("wry://callback", {
-                    code: this.code,
-                    args: args
+                const response = sync_request("wry://callback", {
+                    Evaluate: {
+                        fn_id: this.code,
+                        args: args
+                    }
                 });
+                return handleResponse(response);
             }
         }
     </script>
