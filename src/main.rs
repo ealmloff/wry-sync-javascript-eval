@@ -154,7 +154,7 @@ impl ApplicationHandler<IPCMessage> for State {
                 // path is the string slice, request is the Request object
                 let real_path = request.uri().to_string().replace("wry://", "");
                 let real_path = real_path.as_str().trim_matches('/');
-                if real_path == "" {
+                if real_path == "index" {
                     responder.respond(root_response());
                     return;
                 }
@@ -193,7 +193,7 @@ impl ApplicationHandler<IPCMessage> for State {
                         });
                 }
             })
-            .with_url("wry://local")
+            .with_url("wry://index")
             .build_as_child(&window)
             .unwrap();
 
@@ -587,7 +587,7 @@ fn run_js_sync<T: DeserializeOwned>(
 fn wait_for_js_event<T: DeserializeOwned>() -> T {
     let env = EVENT_LOOP_PROXY.get().expect("Event loop proxy not set");
     THREAD_LOCAL_ENCODER.with(|tle| {
-        while let Some(response) = tle.receiver.try_recv().ok() {
+        while let Some(response) = tle.receiver.recv().ok() {
             match response {
                 IPCMessage::Respond { id: _, response: ResponseOrCall::Response(response) } => {
                     return serde_json::from_value(response).unwrap();
