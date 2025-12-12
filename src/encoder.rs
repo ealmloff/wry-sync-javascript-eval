@@ -27,9 +27,13 @@ impl EncoderBuffer {
     }
 
     fn to_bytes(&self) -> impl Iterator<Item = u8> + '_ {
-        self.u32_buf
-            .iter()
-            .flat_map(|&u| u.to_le_bytes())
+        let u16_offset = self.u32_buf.len() * 4;
+        let u8_offset = u16_offset + self.u16_buf.len() * 2;
+        let str_offset = u8_offset + self.u8_buf.len();
+        [u16_offset as u32, u8_offset as u32, str_offset as u32]
+            .into_iter()
+            .flat_map(|u| u.to_le_bytes())
+            .chain(self.u32_buf.iter().flat_map(|&u| u.to_le_bytes()))
             .chain(self.u16_buf.iter().flat_map(|&u| u.to_le_bytes()))
             .chain(self.u8_buf.iter().cloned())
             .chain(self.str_buf.iter().cloned())
@@ -55,11 +59,69 @@ impl EncoderBuffer {
     }
 
     pub fn push_str(&mut self, value: &str) {
+        self.push_u32(value.len() as u32);
         self.str_buf.extend_from_slice(value.as_bytes());
     }
 
     pub fn push_op(&mut self, op: u32) {
         self.push_u32(op);
+    }
+}
+
+struct DecodedResult<'a> {
+    u8_buf: &'a [u8],
+    u16_buf: &'a [u16],
+    u32_buf: &'a [u32],
+    str_buf: &'a [u8],
+}
+
+impl<'a> DecodedResult<'a> {
+    pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, ()> {
+        let [u16_offset, u8_offset, str_offset] = {
+            let mut arr: [u32; 3] = bytemuck::cast_slice(&bytes[0..12])
+                .try_into()
+                .map_err(|_| ())?;
+            arr
+        };
+
+        let u32_buf = bytemuck::cast_slice(&bytes[12..u16_offset as usize]);
+        let u16_buf = bytemuck::cast_slice(&bytes[u16_offset as usize..u8_offset as usize]);
+        let u8_buf = &bytes[u8_offset as usize..str_offset as usize];
+        let str_buf = &bytes[str_offset as usize..];
+
+        Ok(Self {
+            u8_buf,
+            u16_buf,
+            u32_buf,
+            str_buf,
+        })
+    }
+
+    pub fn take_u8(&mut self) -> Result<u8, ()> {
+        let [first, rest @ ..] = self.u8_buf else {
+            return Err(());
+        };
+        self.u8_buf = rest;
+        Ok(*first)
+    }
+
+    pub fn take_u16(&mut self) -> Result<u16, ()> {
+        let (first, rest) = self.u16_buf.split_first().ok_or(())?;
+        self.u16_buf = rest;
+        Ok(*first)
+    }
+
+    pub fn take_u32(&mut self) -> Result<u32, ()> {
+        let (first, rest) = self.u32_buf.split_first().ok_or(())?;
+        self.u32_buf = rest;
+        Ok(*first)
+    }
+
+    pub fn take_str(&mut self) -> Result<&'a str, ()> {
+        let len = self.take_u32()? as usize;
+        let (str_bytes, rest) = self.str_buf.split_at_checked(len).ok_or(())?;
+        self.str_buf = rest;
+        std::str::from_utf8(str_bytes).map_err(|_| ())
     }
 }
 

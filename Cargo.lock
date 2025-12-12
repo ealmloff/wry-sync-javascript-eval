@@ -3568,6 +3568,7 @@ name = "wry-testing"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "bytemuck",
  "lazy-js-bundle",
  "serde",
  "serde_json",

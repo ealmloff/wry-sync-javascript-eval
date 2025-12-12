@@ -24,6 +24,74 @@ interface ResponseFromRust {
   };
 }
 
+class DataEncoder {
+  private u8Buf: number[];
+  private u16Buf: number[];
+  private u32Buf: number[];
+  private strBuf: string[];
+
+  constructor() {
+    this.u8Buf = [];
+    this.u16Buf = [];
+    this.u32Buf = [];
+    this.strBuf = [];
+  }
+
+  pushU8(value: number) {
+    this.u8Buf.push(value);
+  }
+
+  pushU16(value: number) {
+    this.u16Buf.push(value);
+  }
+
+  pushU32(value: number) {
+    this.u32Buf.push(value);
+  }
+
+  pushStr(value: string) {
+    this.strBuf.push(value);
+  }
+
+  finalize(): ArrayBuffer {
+    const totalSize = this.u8Buf.length + this.u16Buf.length * 2 + this.u32Buf.length * 4 + this.strBuf.reduce((acc, str) => acc + str.length, 0);
+    const buffer = new ArrayBuffer(totalSize + 12); // Extra 12 bytes for offsets
+    
+    // Copy over the u32 offsets
+    const u32View = new Uint32Array(buffer, 0, 3);
+    let offset = 12;
+    u32View[0] = offset;
+    offset += this.u16Buf.length * 2;
+    u32View[1] = offset;
+    offset += this.u8Buf.length;
+    u32View[2] = offset;
+
+    // Copy over the u32 buffer
+    const u32BufView = new Uint32Array(buffer, 12, this.u32Buf.length);
+    u32BufView.set(this.u32Buf);
+
+    // Copy over the u16 buffer
+    const u16BufView = new Uint16Array(buffer, u32View[0], this.u16Buf.length);
+    u16BufView.set(this.u16Buf);
+
+    // Copy over the u8 buffer
+    const u8BufView = new Uint8Array(buffer, u32View[1], this.u8Buf.length);
+    u8BufView.set(this.u8Buf);
+
+    // Copy over the string buffer
+    const strBufView = new Uint8Array(buffer, u32View[2]);
+    const strEncoder = new TextEncoder();
+    let strOffset = 0;
+    for (const str of this.strBuf) {
+      const encodedStr = strEncoder.encode(str);
+      strBufView.set(encodedStr, strOffset);
+      strOffset += encodedStr.length;
+    }
+
+    return buffer;
+  }
+}
+
 class EncodedData {
   private u8Buf: Uint8Array;
   private u8Offset: number;
@@ -71,10 +139,8 @@ class EncodedData {
     return this.u8Buf[this.u8Offset++];
   }
 
-  readString(len: number): string {
-    if (this.string === null) {
-      throw new Error("No string data available");
-    }
+  readString(): string {
+    const len = this.readU32();
     return this.string.substring(this.stringOffset, (this.stringOffset += len));
   }
 }
