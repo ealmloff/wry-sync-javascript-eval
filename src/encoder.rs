@@ -106,13 +106,17 @@ impl<'a> DecodedResult<'a> {
     }
 
     pub fn take_u16(&mut self) -> Result<u16, ()> {
-        let (first, rest) = self.u16_buf.split_first().ok_or(())?;
+        let [first, rest @ ..] = self.u16_buf else {
+            return Err(());
+        };
         self.u16_buf = rest;
         Ok(*first)
     }
 
     pub fn take_u32(&mut self) -> Result<u32, ()> {
-        let (first, rest) = self.u32_buf.split_first().ok_or(())?;
+        let [first, rest @ ..] = self.u32_buf else {
+            return Err(());
+        };
         self.u32_buf = rest;
         Ok(*first)
     }
