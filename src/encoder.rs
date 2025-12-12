@@ -1,290 +1,219 @@
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 use slotmap::{DefaultKey, Key, KeyData, SlotMap};
+use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::sync::mpsc::Receiver;
-use std::sync::{OnceLock, RwLock, mpsc};
+use std::sync::{OnceLock, mpsc};
 use winit::event_loop::EventLoopProxy;
 
 use crate::DomEnv;
-use crate::ipc::IPCMessage;
-
-struct EncoderBuffer {
-    u8_buf: Vec<u8>,
-    u16_buf: Vec<u16>,
-    u32_buf: Vec<u32>,
-    str_buf: Vec<u8>,
-}
-
-impl EncoderBuffer {
-    pub fn new() -> Self {
-        Self {
-            u8_buf: Vec::new(),
-            u16_buf: Vec::new(),
-            u32_buf: Vec::new(),
-            str_buf: Vec::new(),
-        }
-    }
-
-    fn to_bytes(&self) -> impl Iterator<Item = u8> + '_ {
-        let u16_offset = self.u32_buf.len() * 4;
-        let u8_offset = u16_offset + self.u16_buf.len() * 2;
-        let str_offset = u8_offset + self.u8_buf.len();
-        [u16_offset as u32, u8_offset as u32, str_offset as u32]
-            .into_iter()
-            .flat_map(|u| u.to_le_bytes())
-            .chain(self.u32_buf.iter().flat_map(|&u| u.to_le_bytes()))
-            .chain(self.u16_buf.iter().flat_map(|&u| u.to_le_bytes()))
-            .chain(self.u8_buf.iter().cloned())
-            .chain(self.str_buf.iter().cloned())
-    }
-
-    pub fn clear(&mut self) {
-        self.u8_buf.clear();
-        self.u16_buf.clear();
-        self.u32_buf.clear();
-        self.str_buf.clear();
-    }
-
-    pub fn push_u8(&mut self, value: u8) {
-        self.u8_buf.push(value);
-    }
-
-    pub fn push_u16(&mut self, value: u16) {
-        self.u16_buf.push(value);
-    }
-
-    pub fn push_u32(&mut self, value: u32) {
-        self.u32_buf.push(value);
-    }
-
-    pub fn push_str(&mut self, value: &str) {
-        self.push_u32(value.len() as u32);
-        self.str_buf.extend_from_slice(value.as_bytes());
-    }
-
-    pub fn push_op(&mut self, op: u32) {
-        self.push_u32(op);
-    }
-}
-
-struct DecodedResult<'a> {
-    u8_buf: &'a [u8],
-    u16_buf: &'a [u16],
-    u32_buf: &'a [u32],
-    str_buf: &'a [u8],
-}
-
-impl<'a> DecodedResult<'a> {
-    pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, ()> {
-        let [u16_offset, u8_offset, str_offset] = {
-            let mut arr: [u32; 3] = bytemuck::cast_slice(&bytes[0..12])
-                .try_into()
-                .map_err(|_| ())?;
-            arr
-        };
-
-        let u32_buf = bytemuck::cast_slice(&bytes[12..u16_offset as usize]);
-        let u16_buf = bytemuck::cast_slice(&bytes[u16_offset as usize..u8_offset as usize]);
-        let u8_buf = &bytes[u8_offset as usize..str_offset as usize];
-        let str_buf = &bytes[str_offset as usize..];
-
-        Ok(Self {
-            u8_buf,
-            u16_buf,
-            u32_buf,
-            str_buf,
-        })
-    }
-
-    pub fn take_u8(&mut self) -> Result<u8, ()> {
-        let [first, rest @ ..] = self.u8_buf else {
-            return Err(());
-        };
-        self.u8_buf = rest;
-        Ok(*first)
-    }
-
-    pub fn take_u16(&mut self) -> Result<u16, ()> {
-        let [first, rest @ ..] = self.u16_buf else {
-            return Err(());
-        };
-        self.u16_buf = rest;
-        Ok(*first)
-    }
-
-    pub fn take_u32(&mut self) -> Result<u32, ()> {
-        let [first, rest @ ..] = self.u32_buf else {
-            return Err(());
-        };
-        self.u32_buf = rest;
-        Ok(*first)
-    }
-
-    pub fn take_str(&mut self) -> Result<&'a str, ()> {
-        let len = self.take_u32()? as usize;
-        let (str_bytes, rest) = self.str_buf.split_at_checked(len).ok_or(())?;
-        self.str_buf = rest;
-        std::str::from_utf8(str_bytes).map_err(|_| ())
-    }
-}
+use crate::ipc::{IPCMessage, DecodedData, EncodedData, encode_respond};
 
 /// A reference to a JavaScript heap object, identified by a unique ID.
-/// This allows Rust to hold references to arbitrary JS objects stored in the JS heap.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// References are encoded as u32 in the binary protocol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct JSHeapRef {
-    id: u64,
+    id: u32,
 }
 
 impl JSHeapRef {
     /// Create a new JSHeapRef from a raw ID (typically received from JS)
-    pub fn from_id(id: u64) -> Self {
+    #[allow(dead_code)]
+    pub fn from_id(id: u32) -> Self {
         Self { id }
     }
 
     /// Get the raw ID of this heap reference
-    pub fn id(&self) -> u64 {
+    pub fn id(&self) -> u32 {
         self.id
     }
 }
 
-pub(crate) struct Encoder {
+/// Trait for encoding Rust values into the binary protocol.
+/// Each type specifies how to serialize itself.
+pub(crate) trait BinaryEncode {
+    fn encode(&self, encoder: &mut EncodedData, fn_encoder: &mut FunctionEncoder);
+}
+
+/// Trait for decoding values from the binary protocol.
+/// Each type specifies how to deserialize itself.
+pub(crate) trait BinaryDecode: Sized {
+    fn decode(decoder: &mut DecodedData) -> Result<Self, ()>;
+}
+
+// Implementations for basic types
+
+impl BinaryEncode for () {
+    fn encode(&self, _encoder: &mut EncodedData, _fn_encoder: &mut FunctionEncoder) {
+        // Unit type encodes as nothing
+    }
+}
+
+impl BinaryDecode for () {
+    fn decode(_decoder: &mut DecodedData) -> Result<Self, ()> {
+        Ok(())
+    }
+}
+
+impl BinaryEncode for bool {
+    fn encode(&self, encoder: &mut EncodedData, _fn_encoder: &mut FunctionEncoder) {
+        encoder.push_u8(if *self { 1 } else { 0 });
+    }
+}
+
+impl BinaryDecode for bool {
+    fn decode(decoder: &mut DecodedData) -> Result<Self, ()> {
+        Ok(decoder.take_u8()? != 0)
+    }
+}
+
+impl BinaryEncode for u8 {
+    fn encode(&self, encoder: &mut EncodedData, _fn_encoder: &mut FunctionEncoder) {
+        encoder.push_u8(*self);
+    }
+}
+
+impl BinaryDecode for u8 {
+    fn decode(decoder: &mut DecodedData) -> Result<Self, ()> {
+        decoder.take_u8()
+    }
+}
+
+impl BinaryEncode for u16 {
+    fn encode(&self, encoder: &mut EncodedData, _fn_encoder: &mut FunctionEncoder) {
+        encoder.push_u16(*self);
+    }
+}
+
+impl BinaryDecode for u16 {
+    fn decode(decoder: &mut DecodedData) -> Result<Self, ()> {
+        decoder.take_u16()
+    }
+}
+
+impl BinaryEncode for u32 {
+    fn encode(&self, encoder: &mut EncodedData, _fn_encoder: &mut FunctionEncoder) {
+        encoder.push_u32(*self);
+    }
+}
+
+impl BinaryDecode for u32 {
+    fn decode(decoder: &mut DecodedData) -> Result<Self, ()> {
+        decoder.take_u32()
+    }
+}
+
+impl BinaryEncode for i32 {
+    fn encode(&self, encoder: &mut EncodedData, _fn_encoder: &mut FunctionEncoder) {
+        encoder.push_u32(*self as u32);
+    }
+}
+
+impl BinaryDecode for i32 {
+    fn decode(decoder: &mut DecodedData) -> Result<Self, ()> {
+        Ok(decoder.take_u32()? as i32)
+    }
+}
+
+impl BinaryEncode for String {
+    fn encode(&self, encoder: &mut EncodedData, _fn_encoder: &mut FunctionEncoder) {
+        encoder.push_str(self);
+    }
+}
+
+impl BinaryDecode for String {
+    fn decode(decoder: &mut DecodedData) -> Result<Self, ()> {
+        Ok(decoder.take_str()?.to_string())
+    }
+}
+
+impl BinaryEncode for JSHeapRef {
+    fn encode(&self, encoder: &mut EncodedData, _fn_encoder: &mut FunctionEncoder) {
+        encoder.push_u32(self.id);
+    }
+}
+
+impl BinaryDecode for JSHeapRef {
+    fn decode(decoder: &mut DecodedData) -> Result<Self, ()> {
+        Ok(JSHeapRef { id: decoder.take_u32()? })
+    }
+}
+
+impl<T: BinaryDecode> BinaryDecode for Option<T> {
+    fn decode(decoder: &mut DecodedData) -> Result<Self, ()> {
+        let has_value = decoder.take_u8()? != 0;
+        if has_value {
+            Ok(Some(T::decode(decoder)?))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+/// A wrapper for Rust callbacks that can be called from JS.
+/// This is encoded as a u32 callback ID.
+pub struct RustCallback<F> {
+    callback: F,
+}
+
+impl<F> RustCallback<F> {
+    pub fn new(callback: F) -> Self {
+        Self { callback }
+    }
+}
+
+/// Marker type used in JSFunction type signatures
+pub struct Callback;
+
+/// Encoder for storing Rust callbacks that can be called from JS.
+/// This is stored in a thread-local so callbacks persist across the call chain.
+pub(crate) struct FunctionEncoder {
     functions: SlotMap<
         DefaultKey,
-        Option<Box<dyn FnMut(Vec<serde_json::Value>) -> serde_json::Value + Send + Sync>>,
+        Option<Box<dyn FnMut(&mut DecodedData) -> EncodedData + Send + Sync>>,
     >,
 }
 
-impl Encoder {
+impl FunctionEncoder {
     pub(crate) fn new() -> Self {
         Self {
             functions: SlotMap::new(),
         }
     }
 
-    pub(crate) fn encode<T: RustEncode<P>, P>(&mut self, value: T) -> serde_json::Value {
-        value.encode(self)
-    }
-
-    fn encode_function<T: IntoRustCallable<P>, P>(&mut self, function: T) -> serde_json::Value {
-        let key = self.functions.insert(Some(function.into()));
-        serde_json::json!({
-            "type": "function",
-            "id": key.data().as_ffi(),
-        })
+    fn register_function<F>(&mut self, f: F) -> u32
+    where
+        F: FnMut(&mut DecodedData) -> EncodedData + Send + Sync + 'static,
+    {
+        let key = self.functions.insert(Some(Box::new(f)));
+        key.data().as_ffi() as u32
     }
 }
 
-pub(crate) trait RustEncode<P = ()> {
-    fn encode(self, encoder: &mut Encoder) -> serde_json::Value;
+thread_local! {
+    static THREAD_LOCAL_FUNCTION_ENCODER: RefCell<FunctionEncoder> = RefCell::new(FunctionEncoder::new());
 }
 
-impl RustEncode for String {
-    fn encode(self, _encoder: &mut Encoder) -> serde_json::Value {
-        serde_json::Value::String(self)
-    }
-}
-
-impl RustEncode for () {
-    fn encode(self, _encoder: &mut Encoder) -> serde_json::Value {
-        serde_json::Value::Null
-    }
-}
-
-impl RustEncode for i32 {
-    fn encode(self, _encoder: &mut Encoder) -> serde_json::Value {
-        serde_json::Value::Number(serde_json::Number::from(self))
-    }
-}
-
-impl RustEncode for serde_json::Value {
-    fn encode(self, _encoder: &mut Encoder) -> serde_json::Value {
-        self
-    }
-}
-
-impl RustEncode for u64 {
-    fn encode(self, _encoder: &mut Encoder) -> serde_json::Value {
-        serde_json::Value::Number(serde_json::Number::from(self))
-    }
-}
-
-impl RustEncode for JSHeapRef {
-    fn encode(self, _encoder: &mut Encoder) -> serde_json::Value {
-        serde_json::json!({
-            "type": "js_heap_ref",
-            "id": self.id,
-        })
-    }
-}
-
-impl<F, P> RustEncode<P> for F
+/// Register a callback in the thread-local function encoder
+fn register_callback<F>(f: F) -> u32
 where
-    F: IntoRustCallable<P>,
+    F: FnMut(&mut DecodedData) -> EncodedData + Send + Sync + 'static,
 {
-    fn encode(self, encoder: &mut Encoder) -> serde_json::Value {
-        encoder.encode_function(self)
-    }
+    THREAD_LOCAL_FUNCTION_ENCODER.with(|encoder| {
+        encoder.borrow_mut().register_function(f)
+    })
 }
 
-trait IntoRustCallable<T> {
-    fn into(self) -> Box<dyn FnMut(Vec<serde_json::Value>) -> serde_json::Value + Send + Sync>;
-}
-
-impl<R, F> IntoRustCallable<fn() -> R> for F
-where
-    F: FnMut() -> R + Send + Sync + 'static,
-    R: serde::Serialize,
-{
-    fn into(mut self) -> Box<dyn FnMut(Vec<serde_json::Value>) -> serde_json::Value + Send + Sync> {
-        Box::new(move |_: Vec<serde_json::Value>| {
-            let result: R = (self)();
-            serde_json::to_value(result).unwrap()
-        })
-    }
-}
-
-impl<T, R, F> IntoRustCallable<fn(T) -> R> for F
-where
-    F: FnMut(T) -> R + Send + Sync + 'static,
-    T: for<'de> Deserialize<'de>,
-    R: serde::Serialize,
-{
-    fn into(mut self) -> Box<dyn FnMut(Vec<serde_json::Value>) -> serde_json::Value + Send + Sync> {
-        Box::new(move |args: Vec<serde_json::Value>| {
-            let mut args_iter = args.into_iter();
-            let arg: T = serde_json::from_value(args_iter.next().unwrap()).unwrap();
-            let result: R = (self)(arg);
-            serde_json::to_value(result).unwrap()
-        })
-    }
-}
-
-impl<T1, T2, R, F> IntoRustCallable<fn(T1, T2) -> R> for F
-where
-    F: FnMut(T1, T2) -> R + Send + Sync + 'static,
-    T1: for<'de> Deserialize<'de>,
-    T2: for<'de> Deserialize<'de>,
-    R: serde::Serialize,
-{
-    fn into(mut self) -> Box<dyn FnMut(Vec<serde_json::Value>) -> serde_json::Value + Send + Sync> {
-        Box::new(move |args: Vec<serde_json::Value>| {
-            let mut args_iter = args.into_iter();
-            let arg1: T1 = serde_json::from_value(args_iter.next().unwrap()).unwrap();
-            let arg2: T2 = serde_json::from_value(args_iter.next().unwrap()).unwrap();
-            let result: R = (self)(arg1, arg2);
-            serde_json::to_value(result).unwrap()
-        })
-    }
-}
-
+/// A reference to a JavaScript function that can be called from Rust.
+/// 
+/// The type parameter encodes the function signature.
+/// Arguments and return values are serialized using the binary protocol.
 pub struct JSFunction<T> {
-    id: u64,
+    id: u32,
     function: PhantomData<T>,
 }
 
 impl<T> JSFunction<T> {
-    pub const fn new(id: u64) -> Self {
+    pub const fn new(id: u32) -> Self {
         Self {
             id,
             function: PhantomData,
@@ -292,134 +221,136 @@ impl<T> JSFunction<T> {
     }
 }
 
-impl<R> JSFunction<fn() -> R> {
-    pub fn call(&self, _: ()) -> R
-    where
-        R: DeserializeOwned,
-    {
-        run_js_sync(&get_dom().proxy, self.id, vec![])
+impl<R: BinaryDecode> JSFunction<fn() -> R> {
+    pub fn call(&self, _: ()) -> R {
+        let encoder = EncodedData::new();
+        run_js_sync::<R>(self.id, encoder)
     }
 }
 
-impl<T, R> JSFunction<fn(T) -> R> {
-    pub fn call<P>(&self, args: T) -> R
-    where
-        T: RustEncode<P>,
-        R: DeserializeOwned,
-    {
-        let args_json = encode_in_thread_local(args);
-        run_js_sync(&get_dom().proxy, self.id, vec![args_json])
+impl<T1: BinaryEncode, R: BinaryDecode> JSFunction<fn(T1) -> R> {
+    pub fn call(&self, arg: T1) -> R {
+        THREAD_LOCAL_FUNCTION_ENCODER.with(|fn_encoder| {
+            let mut encoder = EncodedData::new();
+            arg.encode(&mut encoder, &mut fn_encoder.borrow_mut());
+            run_js_sync::<R>(self.id, encoder)
+        })
     }
 }
 
-impl<T1, T2, R> JSFunction<fn(T1, T2) -> R> {
-    pub fn call<P1, P2>(&self, arg1: T1, arg2: T2) -> R
-    where
-        T1: RustEncode<P1>,
-        T2: RustEncode<P2>,
-        R: DeserializeOwned,
-    {
-        let arg1_json = encode_in_thread_local(arg1);
-        let arg2_json = encode_in_thread_local(arg2);
-        run_js_sync(&get_dom().proxy, self.id, vec![arg1_json, arg2_json])
+impl<T1: BinaryEncode, T2: BinaryEncode, R: BinaryDecode> JSFunction<fn(T1, T2) -> R> {
+    pub fn call(&self, arg1: T1, arg2: T2) -> R {
+        THREAD_LOCAL_FUNCTION_ENCODER.with(|fn_encoder| {
+            let mut encoder = EncodedData::new();
+            arg1.encode(&mut encoder, &mut fn_encoder.borrow_mut());
+            arg2.encode(&mut encoder, &mut fn_encoder.borrow_mut());
+            run_js_sync::<R>(self.id, encoder)
+        })
     }
 }
 
-impl<T1, T2, T3, R> JSFunction<fn(T1, T2, T3) -> R> {
-    pub fn call<P1, P2, P3>(&self, arg1: T1, arg2: T2, arg3: T3) -> R
-    where
-        T1: RustEncode<P1>,
-        T2: RustEncode<P2>,
-        T3: RustEncode<P3>,
-        R: DeserializeOwned,
-    {
-        let arg1_json = encode_in_thread_local(arg1);
-        let arg2_json = encode_in_thread_local(arg2);
-        let arg3_json = encode_in_thread_local(arg3);
-        run_js_sync(
-            &get_dom().proxy,
-            self.id,
-            vec![arg1_json, arg2_json, arg3_json],
-        )
+impl<T1: BinaryEncode, T2: BinaryEncode, T3: BinaryEncode, R: BinaryDecode> JSFunction<fn(T1, T2, T3) -> R> {
+    pub fn call(&self, arg1: T1, arg2: T2, arg3: T3) -> R {
+        THREAD_LOCAL_FUNCTION_ENCODER.with(|fn_encoder| {
+            let mut encoder = EncodedData::new();
+            arg1.encode(&mut encoder, &mut fn_encoder.borrow_mut());
+            arg2.encode(&mut encoder, &mut fn_encoder.borrow_mut());
+            arg3.encode(&mut encoder, &mut fn_encoder.borrow_mut());
+            run_js_sync::<R>(self.id, encoder)
+        })
     }
 }
-fn run_js_sync<T: DeserializeOwned>(
-    proxy: &EventLoopProxy<IPCMessage>,
-    fn_id: u64,
-    args: Vec<serde_json::Value>,
-) -> T {
-    println!("Sending JS evaluate request...");
-    _ = proxy.send_event(IPCMessage::Evaluate { fn_id, args });
+
+// Special implementation for functions that take a RustCallback using the Callback marker
+impl<T1: BinaryEncode> JSFunction<fn(T1, Callback)> {
+    pub fn call<F: FnMut() -> bool + Send + Sync + 'static>(&self, arg1: T1, callback: F) {
+        THREAD_LOCAL_FUNCTION_ENCODER.with(|fn_encoder| {
+            let mut encoder = EncodedData::new();
+            arg1.encode(&mut encoder, &mut fn_encoder.borrow_mut());
+            
+            // Register the callback and encode its ID
+            let mut cb = callback;
+            let callback_id = register_callback(move |_decoder| {
+                let result = cb();
+                let mut response = EncodedData::new();
+                response.push_u8(if result { 1 } else { 0 });
+                response
+            });
+            encoder.push_u32(callback_id);
+            
+            run_js_sync::<()>(self.id, encoder)
+        })
+    }
+}
+
+fn run_js_sync<R: BinaryDecode>(fn_id: u32, args: EncodedData) -> R {
+    let proxy = &get_dom().proxy;
+    let data = crate::ipc::encode_evaluate(fn_id, &args);
+    
+    println!("Sending JS evaluate request for fn_id: {}", fn_id);
+    _ = proxy.send_event(IPCMessage::Evaluate { fn_id, data });
 
     wait_for_js_event()
 }
 
-pub(crate) fn wait_for_js_event<T: DeserializeOwned>() -> T {
+pub(crate) fn wait_for_js_event<R: BinaryDecode>() -> R {
     let env = EVENT_LOOP_PROXY.get().expect("Event loop proxy not set");
-    THREAD_LOCAL_ENCODER.with(|tle| {
+    THREAD_LOCAL_RECEIVER.with(|receiver| {
         println!("Waiting for JS response...");
-        while let Ok(response) = tle.receiver.recv() {
+        while let Ok(response) = receiver.recv() {
             println!("Received response: {:?}", response);
             match response {
-                IPCMessage::Respond { response } => {
-                    println!("Got response from JS: {:?}", response);
-                    return serde_json::from_value(response).unwrap();
+                IPCMessage::Respond { data } => {
+                    println!("Got response from JS");
+                    // Skip the message type (first u32 after header)
+                    let mut decoder = DecodedData::from_bytes(&data).expect("Failed to decode response");
+                    let _ = decoder.take_u32(); // Skip message type
+                    return R::decode(&mut decoder).expect("Failed to decode return value");
                 }
-                IPCMessage::Evaluate { fn_id, args } => {
-                    let key = KeyData::from_ffi(fn_id).into();
-                    let function = {
-                        let mut encoder = tle.encoder.write().unwrap();
-                        encoder
+                IPCMessage::Evaluate { fn_id, data } => {
+                    let key: DefaultKey = KeyData::from_ffi(fn_id as u64).into();
+                    
+                    // Get the function from the thread-local encoder
+                    let function = THREAD_LOCAL_FUNCTION_ENCODER.with(|fn_encoder| {
+                        fn_encoder
+                            .borrow_mut()
                             .functions
                             .get_mut(key)
-                            .map(|f| f.take().expect("function cannot be called recursively"))
-                    };
+                            .and_then(|f| f.take())
+                    });
+                    
                     if let Some(mut function) = function {
-                        let result = function(args);
-                        println!(
-                            "Evaluated function in Rust, sending response back to JS: {:?}",
-                            result
-                        );
-                        env.js_response(IPCMessage::Respond { response: result });
-                        // Insert it back
-                        let mut encoder = tle.encoder.write().unwrap();
-                        encoder.functions.get_mut(key).unwrap().replace(function);
+                        let mut decoder = DecodedData::from_bytes(&data).expect("Failed to decode");
+                        let _ = decoder.take_u32(); // Skip message type
+                        let _ = decoder.take_u32(); // Skip fn_id
+                        
+                        let result = function(&mut decoder);
+                        println!("Evaluated function in Rust, sending response back to JS");
+                        let response_data = encode_respond(&result);
+                        env.js_response(IPCMessage::Respond { data: response_data });
+                        
+                        // Insert it back into the thread-local encoder
+                        THREAD_LOCAL_FUNCTION_ENCODER.with(|fn_encoder| {
+                            fn_encoder.borrow_mut().functions.get_mut(key).unwrap().replace(function);
+                        });
                     }
                 }
                 IPCMessage::Shutdown => {
-                    panic!()
+                    panic!("Shutdown received")
                 }
             }
         }
-        panic!()
+        panic!("Channel closed")
     })
-}
-
-struct ThreadLocalEncoder {
-    encoder: RwLock<Encoder>,
-    receiver: Receiver<IPCMessage>,
 }
 
 thread_local! {
-    static THREAD_LOCAL_ENCODER: ThreadLocalEncoder = ThreadLocalEncoder {
-        encoder: RwLock::new(Encoder::new()),
-        receiver: {
-            let env = EVENT_LOOP_PROXY.get().expect("Event loop proxy not set");
-            let (sender, receiver) = mpsc::channel();
-            env.set_sender(sender);
-            receiver
-        },
+    static THREAD_LOCAL_RECEIVER: Receiver<IPCMessage> = {
+        let env = EVENT_LOOP_PROXY.get().expect("Event loop proxy not set");
+        let (sender, receiver) = mpsc::channel();
+        env.set_sender(sender);
+        receiver
     };
-}
-
-fn encode_in_thread_local<T: RustEncode<P>, P>(value: T) -> serde_json::Value {
-    println!("Encoding value in Rust...");
-    THREAD_LOCAL_ENCODER.with(|tle| {
-        println!("Encoding value in thread local...");
-        let mut encoder = tle.encoder.write().unwrap();
-        println!("Got encoder lock...");
-        encoder.encode(value)
-    })
 }
 
 static EVENT_LOOP_PROXY: OnceLock<DomEnv> = OnceLock::new();

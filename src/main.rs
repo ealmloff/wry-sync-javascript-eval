@@ -3,7 +3,7 @@ use std::sync::RwLock;
 use winit::event_loop::EventLoopProxy;
 use winit::event_loop::EventLoop;
 
-use crate::encoder::{JSFunction, JSHeapRef, set_event_loop_proxy, wait_for_js_event};
+use crate::encoder::{JSFunction, JSHeapRef, RustCallback, Callback, set_event_loop_proxy, wait_for_js_event};
 use crate::ipc::IPCMessage;
 use crate::webview::State;
 
@@ -82,42 +82,85 @@ fn main() -> wry::Result<()> {
     Ok(())
 }
 
-const CONSOLE_LOG: JSFunction<fn(String)> = JSFunction::new(0);
-const ALERT: JSFunction<fn(String)> = JSFunction::new(1);
+/// JS Function definitions with binary serialization instructions:
+/// 
+/// Each function has a unique ID and specifies how arguments are serialized/deserialized.
+/// The binary format is NOT self-describing, so each side must know the schema.
+/// 
+/// Format: Arguments are encoded in order using push_* methods:
+/// - String: push_str (length as u32, then UTF-8 bytes in str buffer)
+/// - u32/i32: push_u32
+/// - bool: push_u8 (0 or 1)
+/// - JSHeapRef: push_u32 (the reference ID)
+/// - fn(): push_u32 (callback ID registered with FunctionEncoder)
+
+/// console.log(message: String) -> ()
+/// Serialize: push_str(message)
+/// Deserialize return: nothing
+#[allow(dead_code)]
+const CONSOLE_LOG: JSFunction<fn(String) -> ()> = JSFunction::new(0);
+
+/// alert(message: String) -> ()
+/// Serialize: push_str(message)
+/// Deserialize return: nothing
+#[allow(dead_code)]
+const ALERT: JSFunction<fn(String) -> ()> = JSFunction::new(1);
+
+/// add_numbers(a: i32, b: i32) -> i32
+/// Serialize: push_u32(a), push_u32(b)
+/// Deserialize return: take_u32() as i32
+#[allow(dead_code)]
 const ADD_NUMBERS_JS: JSFunction<fn(i32, i32) -> i32> = JSFunction::new(2);
-const ADD_EVENT_LISTENER: JSFunction<fn(String, fn())> = JSFunction::new(3);
-const SET_TEXT_CONTENT: JSFunction<fn(String, String)> = JSFunction::new(4);
 
-// JSHeap operations - these allow Rust to work with arbitrary JS objects
-const HEAP_INSERT: JSFunction<fn(serde_json::Value) -> JSHeapRef> = JSFunction::new(5);
-const HEAP_GET: JSFunction<fn(JSHeapRef) -> serde_json::Value> = JSFunction::new(6);
-const HEAP_REMOVE: JSFunction<fn(u64) -> serde_json::Value> = JSFunction::new(7);
-const HEAP_HAS: JSFunction<fn(u64) -> bool> = JSFunction::new(8);
+/// add_event_listener(event_name: String, callback: Callback) -> ()
+/// Serialize: push_str(event_name), push_u32(callback_id)
+/// The callback returns bool: take_u8() != 0
+const ADD_EVENT_LISTENER: JSFunction<fn(String, Callback)> = JSFunction::new(3);
 
-// DOM operations using heap refs
+/// set_text_content(element_id: String, text: String) -> ()
+/// Serialize: push_str(element_id), push_str(text)
+/// Deserialize return: nothing
+const SET_TEXT_CONTENT: JSFunction<fn(String, String) -> ()> = JSFunction::new(4);
+
+/// heap_has(id: u32) -> bool
+/// Serialize: push_u32(id)
+/// Deserialize return: take_u8() != 0
+const HEAP_HAS: JSFunction<fn(u32) -> bool> = JSFunction::new(8);
+
+/// get_body() -> JSHeapRef
+/// Serialize: nothing
+/// Deserialize return: take_u32() as JSHeapRef
 const GET_BODY: JSFunction<fn() -> JSHeapRef> = JSFunction::new(13);
+
+/// query_selector(selector: String) -> Option<JSHeapRef>
+/// Serialize: push_str(selector)
+/// Deserialize return: take_u8() for has_value, then take_u32() if has_value
+#[allow(dead_code)]
 const QUERY_SELECTOR: JSFunction<fn(String) -> Option<JSHeapRef>> = JSFunction::new(14);
+
+/// create_element(tag: String) -> JSHeapRef
+/// Serialize: push_str(tag)
+/// Deserialize return: take_u32() as JSHeapRef
 const CREATE_ELEMENT: JSFunction<fn(String) -> JSHeapRef> = JSFunction::new(15);
-const APPEND_CHILD: JSFunction<fn(JSHeapRef, JSHeapRef)> = JSFunction::new(16);
-const SET_ATTRIBUTE: JSFunction<fn(JSHeapRef, String, String)> = JSFunction::new(17);
-const SET_TEXT: JSFunction<fn(JSHeapRef, String)> = JSFunction::new(18);
+
+/// append_child(parent: JSHeapRef, child: JSHeapRef) -> ()
+/// Serialize: push_u32(parent.id), push_u32(child.id)
+/// Deserialize return: nothing
+const APPEND_CHILD: JSFunction<fn(JSHeapRef, JSHeapRef) -> ()> = JSFunction::new(16);
+
+/// set_attribute(element: JSHeapRef, name: String, value: String) -> ()
+/// Serialize: push_u32(element.id), push_str(name), push_str(value)
+/// Deserialize return: nothing
+const SET_ATTRIBUTE: JSFunction<fn(JSHeapRef, String, String) -> ()> = JSFunction::new(17);
+
+/// set_text(element: JSHeapRef, text: String) -> ()
+/// Serialize: push_u32(element.id), push_str(text)
+/// Deserialize return: nothing
+const SET_TEXT: JSFunction<fn(JSHeapRef, String) -> ()> = JSFunction::new(18);
 
 fn app() {
     println!("=== JSHeap Demo ===\n");
 
-    // Demo 1: Basic heap operations
-    println!("1. Testing basic heap insert/get...");
-    let obj = serde_json::json!({"name": "Rust", "version": 2024});
-    let heap_ref: JSHeapRef = HEAP_INSERT.call(obj);
-    println!("   Inserted object, got heap ref with id: {}", heap_ref.id());
-
-    let retrieved: serde_json::Value = HEAP_GET.call(heap_ref);
-    println!("   Retrieved from heap: {}", retrieved);
-
-    // Demo 2: Check if heap ref exists
-    println!("\n2. Testing heap_has...");
-    let exists: bool = HEAP_HAS.call(heap_ref.id());
-    println!("   Heap ref {} exists: {}", heap_ref.id(), exists);
 
     // Demo 3: DOM manipulation using heap refs
     println!("\n3. Creating DOM elements using heap refs...");
@@ -165,13 +208,12 @@ fn app() {
 
     // Demo 4: Event handling with heap refs
     println!("\n4. Setting up click handler that updates heap-managed element...");
-    let add_event_listener: JSFunction<fn(_, _)> = JSFunction::new(3);
     let mut count = 0;
 
     // Store the counter display ref for use in the closure
     let counter_ref = counter_display;
 
-    add_event_listener.call("click".to_string(), move || {
+    ADD_EVENT_LISTENER.call("click".to_string(), move || {
         count += 1;
         println!("   Button clicked! Count: {}", count);
 

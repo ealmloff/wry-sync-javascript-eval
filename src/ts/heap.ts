@@ -1,34 +1,26 @@
-// Type definitions
-type SyncRequestContents = RespondPayload | EvaluatePayload;
+/**
+ * Binary Protocol Encoder/Decoder
+ * 
+ * The binary format uses aligned buffers for efficient memory access:
+ * - First 12 bytes: three u32 offsets (u16_offset, u8_offset, str_offset)
+ * - u32 buffer: from byte 12 to u16_offset
+ * - u16 buffer: from u16_offset to u8_offset
+ * - u8 buffer: from u8_offset to str_offset
+ * - string buffer: from str_offset to end
+ * 
+ * Message format in the u32 buffer:
+ * - First u32: message type (0 = Evaluate, 1 = Respond)
+ * - Remaining data depends on message type
+ */
 
-interface RespondPayload {
-  Respond: {
-    response: unknown;
-  };
-}
-
-interface EvaluatePayload {
-  Evaluate: {
-    fn_id: number;
-    args: SerializedArg[];
-  };
-}
-
-interface ResponseFromRust {
-  Respond?: {
-    response: unknown;
-  };
-  Evaluate?: {
-    fn_id: number;
-    args: SerializedArg[];
-  };
-}
-
+/**
+ * Encoder for building binary messages to send to Rust.
+ */
 class DataEncoder {
   private u8Buf: number[];
   private u16Buf: number[];
   private u32Buf: number[];
-  private strBuf: string[];
+  private strBuf: number[]; // UTF-8 bytes
 
   constructor() {
     this.u8Buf = [];
@@ -38,61 +30,68 @@ class DataEncoder {
   }
 
   pushU8(value: number) {
-    this.u8Buf.push(value);
+    this.u8Buf.push(value & 0xff);
   }
 
   pushU16(value: number) {
-    this.u16Buf.push(value);
+    this.u16Buf.push(value & 0xffff);
   }
 
   pushU32(value: number) {
-    this.u32Buf.push(value);
+    this.u32Buf.push(value >>> 0);
   }
 
   pushStr(value: string) {
-    this.strBuf.push(value);
+    const encoded = new TextEncoder().encode(value);
+    this.pushU32(encoded.length);
+    for (let i = 0; i < encoded.length; i++) {
+      this.strBuf.push(encoded[i]);
+    }
   }
 
   finalize(): ArrayBuffer {
-    const totalSize = this.u8Buf.length + this.u16Buf.length * 2 + this.u32Buf.length * 4 + this.strBuf.reduce((acc, str) => acc + str.length, 0);
-    const buffer = new ArrayBuffer(totalSize + 12); // Extra 12 bytes for offsets
-    
-    // Copy over the u32 offsets
-    const u32View = new Uint32Array(buffer, 0, 3);
+    const u16Offset = 12 + this.u32Buf.length * 4;
+    const u8Offset = u16Offset + this.u16Buf.length * 2;
+    const strOffset = u8Offset + this.u8Buf.length;
+    const totalSize = strOffset + this.strBuf.length;
+
+    const buffer = new ArrayBuffer(totalSize);
+    const dataView = new DataView(buffer);
+
+    // Write header offsets (little-endian)
+    dataView.setUint32(0, u16Offset, true);
+    dataView.setUint32(4, u8Offset, true);
+    dataView.setUint32(8, strOffset, true);
+
+    // Write u32 buffer
     let offset = 12;
-    u32View[0] = offset;
-    offset += this.u16Buf.length * 2;
-    u32View[1] = offset;
-    offset += this.u8Buf.length;
-    u32View[2] = offset;
-
-    // Copy over the u32 buffer
-    const u32BufView = new Uint32Array(buffer, 12, this.u32Buf.length);
-    u32BufView.set(this.u32Buf);
-
-    // Copy over the u16 buffer
-    const u16BufView = new Uint16Array(buffer, u32View[0], this.u16Buf.length);
-    u16BufView.set(this.u16Buf);
-
-    // Copy over the u8 buffer
-    const u8BufView = new Uint8Array(buffer, u32View[1], this.u8Buf.length);
-    u8BufView.set(this.u8Buf);
-
-    // Copy over the string buffer
-    const strBufView = new Uint8Array(buffer, u32View[2]);
-    const strEncoder = new TextEncoder();
-    let strOffset = 0;
-    for (const str of this.strBuf) {
-      const encodedStr = strEncoder.encode(str);
-      strBufView.set(encodedStr, strOffset);
-      strOffset += encodedStr.length;
+    for (const val of this.u32Buf) {
+      dataView.setUint32(offset, val, true);
+      offset += 4;
     }
+
+    // Write u16 buffer
+    for (const val of this.u16Buf) {
+      dataView.setUint16(offset, val, true);
+      offset += 2;
+    }
+
+    // Write u8 buffer
+    const u8View = new Uint8Array(buffer, u8Offset, this.u8Buf.length);
+    u8View.set(this.u8Buf);
+
+    // Write string buffer
+    const strView = new Uint8Array(buffer, strOffset, this.strBuf.length);
+    strView.set(this.strBuf);
 
     return buffer;
   }
 }
 
-class EncodedData {
+/**
+ * Decoder for reading binary messages from Rust.
+ */
+class DataDecoder {
   private u8Buf: Uint8Array;
   private u8Offset: number;
 
@@ -102,69 +101,56 @@ class EncodedData {
   private u32Buf: Uint32Array;
   private u32Offset: number;
 
-  private string: string;
-  private stringOffset: number;
+  private strBuf: Uint8Array;
+  private strOffset: number;
 
   constructor(data: ArrayBuffer) {
-    const u32Buf = new Uint32Array(data);
+    const headerView = new DataView(data, 0, 12);
+    const u16ByteOffset = headerView.getUint32(0, true);
+    const u8ByteOffset = headerView.getUint32(4, true);
+    const strByteOffset = headerView.getUint32(8, true);
 
-    const u32Offset = 3 * 4; // For the three u32 offsets at the start
-    this.u32Buf = new Uint32Array(data, 0, u32Offset);
+    // u32 buffer starts at byte 12, ends at u16ByteOffset
+    const u32ByteLength = u16ByteOffset - 12;
+    this.u32Buf = new Uint32Array(data, 12, u32ByteLength / 4);
     this.u32Offset = 0;
 
-    const u16Offset = u32Buf[0];
-    this.u16Buf = new Uint16Array(data, u16Offset);
+    // u16 buffer
+    const u16ByteLength = u8ByteOffset - u16ByteOffset;
+    this.u16Buf = new Uint16Array(data, u16ByteOffset, u16ByteLength / 2);
     this.u16Offset = 0;
 
-    const u8Offset = u32Buf[1];
-    this.u8Buf = new Uint8Array(data, u8Offset);
+    // u8 buffer
+    const u8ByteLength = strByteOffset - u8ByteOffset;
+    this.u8Buf = new Uint8Array(data, u8ByteOffset, u8ByteLength);
     this.u8Offset = 0;
 
-    const strOffset = u32Buf[2];
-    const strBuf = new Uint8Array(data, strOffset);
-    this.string = new TextDecoder("utf-8").decode(strBuf);
-
-    this.stringOffset = 0;
+    // string buffer
+    this.strBuf = new Uint8Array(data, strByteOffset);
+    this.strOffset = 0;
   }
 
-  readU32(): number {
-    return this.u32Buf[this.u32Offset++];
-  }
-
-  readU16(): number {
-    return this.u16Buf[this.u16Offset++];
-  }
-
-  readU8(): number {
+  takeU8(): number {
     return this.u8Buf[this.u8Offset++];
   }
 
-  readString(): string {
-    const len = this.readU32();
-    return this.string.substring(this.stringOffset, (this.stringOffset += len));
+  takeU16(): number {
+    return this.u16Buf[this.u16Offset++];
+  }
+
+  takeU32(): number {
+    return this.u32Buf[this.u32Offset++];
+  }
+
+  takeStr(): string {
+    const len = this.takeU32();
+    const bytes = this.strBuf.subarray(this.strOffset, this.strOffset + len);
+    this.strOffset += len;
+    return new TextDecoder("utf-8").decode(bytes);
   }
 }
 
-interface SerializedJSHeapRef {
-  type: "js_heap_ref";
-  id: number;
-}
-
-interface SerializedFunction {
-  type: "function";
-  id: number;
-}
-
-type SerializedArg =
-  | string
-  | number
-  | SerializedArg[]
-  | SerializedFunction
-  | SerializedJSHeapRef
-  | { [key: string]: SerializedArg };
-
 // SlotMap implementation for JS heap types
-// Uses a free list approach with max ID tracking for efficient slot reuse
 class JSHeap {
   private slots: (unknown | undefined)[];
   private freeIds: number[];
@@ -176,14 +162,11 @@ class JSHeap {
     this.maxId = 0;
   }
 
-  // Insert a value and return its unique ID
   insert(value: unknown): number {
     let id: number;
     if (this.freeIds.length > 0) {
-      // Reuse a freed slot
       id = this.freeIds.pop()!;
     } else {
-      // Allocate a new slot
       id = this.maxId;
       this.maxId++;
     }
@@ -191,12 +174,10 @@ class JSHeap {
     return id;
   }
 
-  // Get a value by ID, returns undefined if not found
   get(id: number): unknown | undefined {
     return this.slots[id];
   }
 
-  // Remove a value by ID and add the slot to the free list
   remove(id: number): unknown | undefined {
     const value = this.slots[id];
     if (value !== undefined) {
@@ -206,310 +187,296 @@ class JSHeap {
     return value;
   }
 
-  // Check if an ID is currently in use
   has(id: number): boolean {
     return this.slots[id] !== undefined;
   }
-
-  // Serialize a value to a JSHeapRef, inserting it into the heap
-  serialize(value: unknown): SerializedJSHeapRef {
-    const id = this.insert(value);
-    return {
-      type: "js_heap_ref",
-      id: id,
-    };
-  }
 }
 
-// Global JS heap instance for storing arbitrary JS values
 const jsHeap = new JSHeap();
 
-// This function sends the event to the virtualdom and then waits for the virtualdom to process it
-//
-// However, it's not really suitable for liveview, because it's synchronous and will block the main thread
-// We should definitely consider using a websocket if we want to block... or just not block on liveview
-// Liveview is a little bit of a tricky beast
-function sync_request(
-  endpoint: string,
-  contents: SyncRequestContents
-): ResponseFromRust | null {
-  // Handle the event on the virtualdom and then process whatever its output was
+/**
+ * Sends binary data to Rust and receives binary response.
+ */
+function sync_request_binary(endpoint: string, data: ArrayBuffer): ArrayBuffer | null {
   const xhr = new XMLHttpRequest();
-
-  // Serialize the event and send it to the custom protocol in the Rust side of things
   xhr.open("POST", endpoint, false);
-  xhr.setRequestHeader("Content-Type", "application/json");
+  xhr.responseType = "arraybuffer";
 
-  // hack for android since we CANT SEND BODIES (because wry is using shouldInterceptRequest)
-  //
-  // https://issuetracker.google.com/issues/119844519
-  // https://stackoverflow.com/questions/43273640/android-webviewclient-how-to-get-post-request-body
-  // https://developer.android.com/reference/android/webkit/WebViewClient#shouldInterceptRequest(android.webkit.WebView,%20android.webkit.WebResourceRequest)
-  //
-  // the issue here isn't that big, tbh, but there's a small chance we lose the event due to header max size (16k per header, 32k max)
-  const json_string = JSON.stringify(contents);
-  console.log("Sending request to Rust:", json_string);
-  const contents_bytes = new TextEncoder().encode(json_string);
-  const contents_base64 = btoa(
-    String.fromCharCode.apply(null, contents_bytes as unknown as number[])
-  );
-  xhr.setRequestHeader("dioxus-data", contents_base64);
+  // Encode as base64 for header (Android workaround)
+  const bytes = new Uint8Array(data);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  const base64 = btoa(binary);
+  xhr.setRequestHeader("dioxus-data", base64);
   xhr.send();
 
-  const response_text = xhr.responseText;
-  console.log("Received response from Rust:", response_text);
-  try {
-    return JSON.parse(response_text) as ResponseFromRust;
-  } catch (e) {
-    console.error("Failed to parse response JSON:", e);
-    return null;
+  if (xhr.status === 200 && xhr.response && xhr.response.byteLength > 0) {
+    return xhr.response as ArrayBuffer;
   }
-}
-
-type AnyFunction = (...args: any[]) => any;
-
-function run_code(code: number, args: unknown[]): unknown {
-  let f: AnyFunction;
-  switch (code) {
-    case 0:
-      f = console.log;
-      break;
-    case 1:
-      f = alert;
-      break;
-    case 2:
-      f = (a: number, b: number) => a + b;
-      break;
-    case 3:
-      f = (event_name: string, callback: RustFunction) => {
-        document.addEventListener(event_name, (e: Event) => {
-          if (callback.call()) {
-            e.preventDefault();
-            console.log(
-              "Event " + event_name + " default prevented by Rust callback."
-            );
-          }
-        });
-      };
-      break;
-    case 4:
-      f = (element_id: string, text_content: string) => {
-        const element = document.getElementById(element_id);
-        if (element) {
-          element.textContent = text_content;
-        } else {
-          console.warn("Element with ID " + element_id + " not found.");
-        }
-      };
-      break;
-    // JSHeap operations
-    case 5:
-      // heap_insert: Insert a value into the heap and return a heap ref
-      // We explicitly return a SerializedJSHeapRef since serialize_return would
-      // pass through plain objects as-is
-      f = (value: unknown): SerializedJSHeapRef => {
-        const id = jsHeap.insert(value);
-        return { type: "js_heap_ref", id: id };
-      };
-      break;
-    case 6:
-      // heap_get: Get a value from the heap by its reference (already deserialized)
-      f = (value: unknown) => value;
-      break;
-    case 7:
-      // heap_remove: Remove a value from the heap and return it
-      f = (id: number) => jsHeap.remove(id);
-      break;
-    case 8:
-      // heap_has: Check if an ID exists in the heap
-      f = (id: number) => jsHeap.has(id);
-      break;
-    case 9:
-      // Create a JS object and return a heap reference to it
-      // serialize_return handles plain objects, so we need explicit heap insertion
-      f = (props: Record<string, unknown>) => {
-        const id = jsHeap.insert(props);
-        return { type: "js_heap_ref", id: id };
-      };
-      break;
-    case 10:
-      // Get a property from a heap object
-      f = (obj: Record<string, unknown>, key: string) => obj[key];
-      break;
-    case 11:
-      // Set a property on a heap object
-      f = (obj: Record<string, unknown>, key: string, value: unknown) => {
-        obj[key] = value;
-      };
-      break;
-    case 12:
-      // Call a method on a heap object
-      f = (
-        obj: Record<string, unknown>,
-        method: string,
-        methodArgs: unknown[]
-      ) => {
-        const fn = obj[method];
-        if (typeof fn === "function") {
-          return fn.apply(obj, methodArgs);
-        }
-        throw new Error("Method " + method + " is not a function");
-      };
-      break;
-    case 13:
-      // Get document.body - serialize_return will auto-convert to heap ref
-      f = () => document.body;
-      break;
-    case 14:
-      // querySelector - serialize_return will auto-convert to heap ref
-      f = (selector: string) => document.querySelector(selector);
-      break;
-    case 15:
-      // createElement - serialize_return will auto-convert to heap ref
-      f = (tag: string) => document.createElement(tag);
-      break;
-    case 16:
-      // appendChild - don't return the child, Rust expects unit
-      f = (parent: Element, child: Element) => {
-        parent.appendChild(child);
-      };
-      break;
-    case 17:
-      // Set element attribute
-      f = (el: Element, name: string, value: string) =>
-        el.setAttribute(name, value);
-      break;
-    case 18:
-      // Set element textContent
-      f = (el: Element, text: string) => {
-        el.textContent = text;
-      };
-      break;
-    default:
-      throw new Error("Unknown code: " + code);
-  }
-  return f.apply(null, args);
-}
-
-function evaluate_from_rust(code: number, args_json: SerializedArg[]): unknown {
-  let args = deserialize_args(args_json) as unknown[];
-  const result = run_code(code, args);
-  const serialized_result = serialize_return(result);
-  const response: RespondPayload = {
-    Respond: {
-      response: serialized_result,
-    },
-  };
-  const request_result = sync_request("wry://handler", response);
-  return handleResponse(request_result);
-}
-
-function deserialize_args(args_json: SerializedArg): unknown {
-  if (typeof args_json === "string") {
-    return args_json;
-  } else if (typeof args_json === "number") {
-    return args_json;
-  } else if (Array.isArray(args_json)) {
-    return args_json.map(deserialize_args);
-  } else if (typeof args_json === "object" && args_json !== null) {
-    if ((args_json as SerializedFunction).type === "function") {
-      return new RustFunction((args_json as SerializedFunction).id);
-    } else if ((args_json as SerializedJSHeapRef).type === "js_heap_ref") {
-      // Retrieve the JS object from the heap using its ID
-      const id = (args_json as SerializedJSHeapRef).id;
-      const value = jsHeap.get(id);
-      if (value === undefined) {
-        console.warn("JSHeap reference with ID " + id + " not found.");
-      }
-      return value;
-    } else {
-      const obj: { [key: string]: unknown } = {};
-      for (const key in args_json) {
-        obj[key] = deserialize_args(
-          (args_json as { [key: string]: SerializedArg })[key]
-        );
-      }
-      return obj;
-    }
-  }
-}
-
-// Serialize a return value for sending back to Rust
-// - null/undefined become null
-// - Primitives (string, number, boolean) pass through as-is
-// - Arrays are recursively serialized
-// - Objects that are already SerializedJSHeapRef pass through
-// - Plain objects have properties recursively serialized
-// - Other objects (DOM elements, etc.) are stored in the heap and returned as refs
-function serialize_return(value: unknown): SerializedArg | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value as SerializedArg;
-  }
-  if (Array.isArray(value)) {
-    return value.map(serialize_return) as SerializedArg[];
-  }
-  if (typeof value === "object") {
-    // Check if it's already a serialized heap ref (has type: "js_heap_ref")
-    const obj = value as Record<string, unknown>;
-    if (obj.type === "js_heap_ref" && typeof obj.id === "number") {
-      return value as SerializedJSHeapRef;
-    }
-    // Check if it's a plain object (not a DOM node, etc.)
-    if (Object.getPrototypeOf(value) === Object.prototype) {
-      // Plain object - serialize each property
-      const result: { [key: string]: SerializedArg } = {};
-      for (const key in obj) {
-        result[key] = serialize_return(obj[key]) as SerializedArg;
-      }
-      return result;
-    }
-    // Non-plain object (DOM element, etc.) - store in heap
-    return jsHeap.serialize(value);
-  }
-  // Fallback for other types (functions, symbols, etc.) - return null
   return null;
 }
 
-function handleResponse(response: ResponseFromRust | null): unknown {
-  if (!response) {
-    return;
+/**
+ * Rust function wrapper that can call back into Rust.
+ */
+class RustFunction {
+  private fnId: number;
+
+  constructor(fnId: number) {
+    this.fnId = fnId;
   }
-  console.log("Handling response:", response);
-  if (response.Respond) {
-    return response.Respond.response;
-  } else if (response.Evaluate) {
-    return evaluate_from_rust(response.Evaluate.fn_id, response.Evaluate.args);
-  } else {
-    throw new Error("Unknown response type");
+
+  call(): unknown {
+    // Build Evaluate message: [0, fn_id]
+    const encoder = new DataEncoder();
+    encoder.pushU32(0); // Message type: Evaluate
+    encoder.pushU32(this.fnId);
+    
+    const response = sync_request_binary("wry://handler", encoder.finalize());
+    return handleBinaryResponse(response);
   }
 }
 
-class RustFunction {
-  code: number;
+/**
+ * Function registry - maps function IDs to their serialization/deserialization specs.
+ * 
+ * Each function has:
+ * - Argument deserialization: how to read args from decoder
+ * - Return serialization: how to write return value to encoder
+ */
+interface FunctionSpec {
+  deserializeArgs: (decoder: DataDecoder) => unknown[];
+  serializeReturn: (encoder: DataEncoder, value: unknown) => void;
+  impl: (...args: unknown[]) => unknown;
+}
 
-  constructor(code: number) {
-    this.code = code;
-  }
+const functionRegistry: Map<number, FunctionSpec> = new Map();
 
-  call(...args: unknown[]): unknown {
-    const response = sync_request("wry://handler", {
-      Evaluate: {
-        fn_id: this.code,
-        args: args as SerializedArg[],
-      },
+// Register all functions with their serialization specs
+
+// 0: console.log(message: String) -> ()
+// Deserialize: takeStr()
+// Serialize return: nothing
+functionRegistry.set(0, {
+  deserializeArgs: (d) => [d.takeStr()],
+  serializeReturn: () => {},
+  impl: (msg: unknown) => console.log(msg),
+});
+
+// 1: alert(message: String) -> ()
+functionRegistry.set(1, {
+  deserializeArgs: (d) => [d.takeStr()],
+  serializeReturn: () => {},
+  impl: (msg: unknown) => alert(msg as string),
+});
+
+// 2: add_numbers(a: i32, b: i32) -> i32
+// Deserialize: takeU32(), takeU32()
+// Serialize return: pushU32()
+functionRegistry.set(2, {
+  deserializeArgs: (d) => [d.takeU32(), d.takeU32()],
+  serializeReturn: (e, v) => e.pushU32(v as number),
+  impl: (a: unknown, b: unknown) => (a as number) + (b as number),
+});
+
+// 3: add_event_listener(event_name: String, callback_id: u32) -> ()
+// Deserialize: takeStr(), takeU32()
+// Serialize return: nothing
+functionRegistry.set(3, {
+  deserializeArgs: (d) => [d.takeStr(), d.takeU32()],
+  serializeReturn: () => {},
+  impl: (eventName: unknown, callbackId: unknown) => {
+    const rustFn = new RustFunction(callbackId as number);
+    document.addEventListener(eventName as string, (e: Event) => {
+      const result = rustFn.call() as boolean;
+      if (result) {
+        e.preventDefault();
+        console.log("Event " + eventName + " default prevented by Rust callback.");
+      }
     });
-    return handleResponse(response);
+  },
+});
+
+// 4: set_text_content(element_id: String, text: String) -> ()
+// Deserialize: takeStr(), takeStr()
+// Serialize return: nothing
+functionRegistry.set(4, {
+  deserializeArgs: (d) => [d.takeStr(), d.takeStr()],
+  serializeReturn: () => {},
+  impl: (elementId: unknown, textContent: unknown) => {
+    const element = document.getElementById(elementId as string);
+    if (element) {
+      element.textContent = textContent as string;
+    } else {
+      console.warn("Element with ID " + elementId + " not found.");
+    }
+  },
+});
+
+// 8: heap_has(id: u32) -> bool
+// Deserialize: takeU32()
+// Serialize return: pushU8(0 or 1)
+functionRegistry.set(8, {
+  deserializeArgs: (d) => [d.takeU32()],
+  serializeReturn: (e, v) => e.pushU8((v as boolean) ? 1 : 0),
+  impl: (id: unknown) => jsHeap.has(id as number),
+});
+
+// 13: get_body() -> JSHeapRef
+// Deserialize: nothing
+// Serialize return: pushU32(heap_id)
+functionRegistry.set(13, {
+  deserializeArgs: () => [],
+  serializeReturn: (e, v) => e.pushU32(v as number),
+  impl: () => jsHeap.insert(document.body),
+});
+
+// 14: query_selector(selector: String) -> Option<JSHeapRef>
+// Deserialize: takeStr()
+// Serialize return: pushU8(has_value), pushU32(heap_id) if has_value
+functionRegistry.set(14, {
+  deserializeArgs: (d) => [d.takeStr()],
+  serializeReturn: (e, v) => {
+    if (v === null || v === undefined) {
+      e.pushU8(0);
+    } else {
+      e.pushU8(1);
+      e.pushU32(v as number);
+    }
+  },
+  impl: (selector: unknown) => {
+    const el = document.querySelector(selector as string);
+    return el ? jsHeap.insert(el) : null;
+  },
+});
+
+// 15: create_element(tag: String) -> JSHeapRef
+// Deserialize: takeStr()
+// Serialize return: pushU32(heap_id)
+functionRegistry.set(15, {
+  deserializeArgs: (d) => [d.takeStr()],
+  serializeReturn: (e, v) => e.pushU32(v as number),
+  impl: (tag: unknown) => jsHeap.insert(document.createElement(tag as string)),
+});
+
+// 16: append_child(parent: JSHeapRef, child: JSHeapRef) -> ()
+// Deserialize: takeU32(), takeU32()
+// Serialize return: nothing
+functionRegistry.set(16, {
+  deserializeArgs: (d) => [d.takeU32(), d.takeU32()],
+  serializeReturn: () => {},
+  impl: (parentId: unknown, childId: unknown) => {
+    const parent = jsHeap.get(parentId as number) as Element;
+    const child = jsHeap.get(childId as number) as Element;
+    parent.appendChild(child);
+  },
+});
+
+// 17: set_attribute(element: JSHeapRef, name: String, value: String) -> ()
+// Deserialize: takeU32(), takeStr(), takeStr()
+// Serialize return: nothing
+functionRegistry.set(17, {
+  deserializeArgs: (d) => [d.takeU32(), d.takeStr(), d.takeStr()],
+  serializeReturn: () => {},
+  impl: (elId: unknown, name: unknown, value: unknown) => {
+    const el = jsHeap.get(elId as number) as Element;
+    el.setAttribute(name as string, value as string);
+  },
+});
+
+// 18: set_text(element: JSHeapRef, text: String) -> ()
+// Deserialize: takeU32(), takeStr()
+// Serialize return: nothing
+functionRegistry.set(18, {
+  deserializeArgs: (d) => [d.takeU32(), d.takeStr()],
+  serializeReturn: () => {},
+  impl: (elId: unknown, text: unknown) => {
+    const el = jsHeap.get(elId as number) as Element;
+    el.textContent = text as string;
+  },
+});
+
+/**
+ * Entry point for Rust to call JS functions using binary protocol.
+ * 
+ * @param fnId - The function ID to call
+ * @param dataBase64 - Base64 encoded binary data containing message
+ */
+function evaluate_from_rust_binary(fnId: number, dataBase64: string): unknown {
+  // Decode base64 to ArrayBuffer
+  const binary = atob(dataBase64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
   }
+  const data = bytes.buffer;
+
+  // Decode the message
+  const decoder = new DataDecoder(data);
+  const msgType = decoder.takeU32(); // Should be 0 (Evaluate)
+  const decodedFnId = decoder.takeU32(); // Function ID
+
+  console.log("evaluate_from_rust_binary: fnId=" + fnId + ", msgType=" + msgType + ", decodedFnId=" + decodedFnId);
+
+  const spec = functionRegistry.get(fnId);
+  if (!spec) {
+    throw new Error("Unknown function ID: " + fnId);
+  }
+
+  // Deserialize arguments and call the function
+  const args = spec.deserializeArgs(decoder);
+  const result = spec.impl(...args);
+
+  // Serialize the result and send response
+  const encoder = new DataEncoder();
+  encoder.pushU32(1); // Message type: Respond
+  spec.serializeReturn(encoder, result);
+
+  const response = sync_request_binary("wry://handler", encoder.finalize());
+  return handleBinaryResponse(response);
+}
+
+/**
+ * Handle binary response from Rust.
+ */
+function handleBinaryResponse(response: ArrayBuffer | null): unknown {
+  if (!response || response.byteLength === 0) {
+    return undefined;
+  }
+
+  const decoder = new DataDecoder(response);
+  const msgType = decoder.takeU32();
+
+  if (msgType === 1) {
+    // Respond - just return (caller will decode the value)
+    return undefined;
+  } else if (msgType === 0) {
+    // Evaluate - Rust is calling a JS function
+    const fnId = decoder.takeU32();
+    
+    const spec = functionRegistry.get(fnId);
+    if (!spec) {
+      throw new Error("Unknown function ID in response: " + fnId);
+    }
+
+    const args = spec.deserializeArgs(decoder);
+    const result = spec.impl(...args);
+
+    // Send response back
+    const encoder = new DataEncoder();
+    encoder.pushU32(1); // Respond
+    spec.serializeReturn(encoder, result);
+
+    const nextResponse = sync_request_binary("wry://handler", encoder.finalize());
+    return handleBinaryResponse(nextResponse);
+  }
+
+  return undefined;
 }
 
 // @ts-ignore
-window.evaluate_from_rust = evaluate_from_rust;
+window.evaluate_from_rust_binary = evaluate_from_rust_binary;
 // @ts-ignore
 window.jsHeap = jsHeap;

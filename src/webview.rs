@@ -1,3 +1,4 @@
+use base64::Engine;
 use std::fmt::Debug;
 use std::sync::{Arc, RwLock};
 use winit::{
@@ -112,25 +113,11 @@ impl ApplicationHandler<IPCMessage> for State {
             return;
         }
 
-        if let IPCMessage::Evaluate { fn_id, args } = event {
-            fn format_call<'a>(
-                function_id: u64,
-                args: impl Iterator<Item = serde_json::Value>,
-            ) -> String {
-                let mut call = String::new();
-                call.push_str("window.evaluate_from_rust(");
-                call.push_str(&function_id.to_string());
-                call.push_str(", [");
-                for (i, arg) in args.enumerate() {
-                    if i > 0 {
-                        call.push_str(", ");
-                    }
-                    call.push_str(&arg.to_string());
-                }
-                call.push_str("])");
-                call
-            }
-            let code = format_call(fn_id, args.into_iter());
+        if let IPCMessage::Evaluate { fn_id, data } = event {
+            // Encode the binary data as base64 and pass to JS
+            let engine = base64::engine::general_purpose::STANDARD;
+            let data_base64 = engine.encode(&data);
+            let code = format!("window.evaluate_from_rust_binary({}, \"{}\")", fn_id, data_base64);
             self.webview
                 .as_ref()
                 .unwrap()
@@ -177,10 +164,17 @@ impl SharedWebviewState {
                 "Responding to ongoing request with response: {:?}",
                 response
             );
+            // Send binary response data
+            let body = match response {
+                IPCMessage::Evaluate { data, .. } => data,
+                IPCMessage::Respond { data } => data,
+                IPCMessage::Shutdown => vec![],
+            };
             responder.respond(
                 wry::http::Response::builder()
                     .status(200)
-                    .body(serde_json::to_vec(&response).unwrap())
+                    .header("Content-Type", "application/octet-stream")
+                    .body(body)
                     .expect("Failed to build response"),
             );
         }
