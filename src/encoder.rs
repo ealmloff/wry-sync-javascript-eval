@@ -297,7 +297,7 @@ pub(crate) fn wait_for_js_event<R: BinaryDecode>() -> R {
                     // Skip the message type (first u32 after header)
                     let mut decoder =
                         DecodedData::from_bytes(&data).expect("Failed to decode response");
-                    let _ = decoder.take_u32(); // Skip message type
+                    let _ = decoder.take_u8(); // Skip message type
                     return R::decode(&mut decoder).expect("Failed to decode return value");
                 }
                 IPCMessage::Evaluate { fn_id, data } => {
@@ -306,7 +306,7 @@ pub(crate) fn wait_for_js_event<R: BinaryDecode>() -> R {
                         0 => {
                             let mut decoder =
                                 DecodedData::from_bytes(&data).expect("Failed to decode");
-                            let _ = decoder.take_u32(); // Skip message type
+                            let _ = decoder.take_u8(); // Skip message type
                             let _ = decoder.take_u32(); // Skip fn_id
                             let key = KeyData::from_ffi(decoder.take_u64().unwrap() as u64).into();
                             println!("Decoded function key: {:?}", key);
@@ -329,7 +329,7 @@ pub(crate) fn wait_for_js_event<R: BinaryDecode>() -> R {
                                     .expect("Failed to downcast to RustCallback");
 
                                 let mut encoder = EncodedData::new();
-                                encoder.push_u32(1); // Respond message type
+                                encoder.push_u8(1); // Respond message type
                                 println!("Calling Rust function from JS...");
                                 (&mut function_callback.f)(
                                     &mut decoder,

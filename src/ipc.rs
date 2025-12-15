@@ -11,7 +11,7 @@ use std::fmt::Debug;
 /// - string buffer: from str_offset to end
 ///
 /// Message format in the u32 buffer:
-/// - First u32: message type (0 = Evaluate, 1 = Respond)
+/// - First u8: message type (0 = Evaluate, 1 = Respond)
 /// - Remaining data depends on message type
 #[derive(Debug)]
 pub(crate) enum IPCMessage {
@@ -33,13 +33,9 @@ pub(crate) enum IPCMessage {
 /// Decoded binary data with aligned buffer access
 pub(crate) struct DecodedData<'a> {
     u8_buf: &'a [u8],
-    u8_offset: usize,
     u16_buf: &'a [u16],
-    u16_offset: usize,
     u32_buf: &'a [u32],
-    u32_offset: usize,
     str_buf: &'a [u8],
-    str_offset: usize,
 }
 
 impl<'a> DecodedData<'a> {
@@ -60,43 +56,35 @@ impl<'a> DecodedData<'a> {
 
         Ok(Self {
             u8_buf,
-            u8_offset: 0,
             u16_buf,
-            u16_offset: 0,
             u32_buf,
-            u32_offset: 0,
             str_buf,
-            str_offset: 0,
         })
     }
 
     pub fn take_u8(&mut self) -> Result<u8, ()> {
-        if self.u8_offset >= self.u8_buf.len() {
+        let [first, rest @ ..] = &self.u8_buf else {
             return Err(());
-        }
-        let val = self.u8_buf[self.u8_offset];
-        self.u8_offset += 1;
-        Ok(val)
+        };
+        self.u8_buf = rest;
+        Ok(*first)
     }
 
     pub fn take_u16(&mut self) -> Result<u16, ()> {
-        if self.u16_offset >= self.u16_buf.len() {
+        let [first, rest @ ..] = &self.u16_buf else {
             return Err(());
-        }
-        let val = self.u16_buf[self.u16_offset];
-        self.u16_offset += 1;
-        Ok(val)
+        };
+        self.u16_buf = rest;
+        Ok(*first)
     }
 
     pub fn take_u32(&mut self) -> Result<u32, ()> {
-        if self.u32_offset >= self.u32_buf.len() {
+        let [first, rest @ ..] = &self.u32_buf else {
             return Err(());
-        }
-        let val = self.u32_buf[self.u32_offset];
-        self.u32_offset += 1;
-        Ok(val)
+        };
+        self.u32_buf = rest;
+        Ok(*first)
     }
-
     pub fn take_u64(&mut self) -> Result<u64, ()> {
         let low = self.take_u32()? as u64;
         let high = self.take_u32()? as u64;
@@ -105,12 +93,12 @@ impl<'a> DecodedData<'a> {
 
     pub fn take_str(&mut self) -> Result<&'a str, ()> {
         let len = self.take_u32()? as usize;
-        if self.str_offset + len > self.str_buf.len() {
+        let Some((buf, rem)) = self.str_buf.split_at_checked(len) else {
             return Err(());
-        }
-        let s = std::str::from_utf8(&self.str_buf[self.str_offset..self.str_offset + len])
+        };
+        let s = std::str::from_utf8(buf)
             .map_err(|_| ())?;
-        self.str_offset += len;
+        self.str_buf = rem;
         Ok(s)
     }
 }
@@ -198,7 +186,7 @@ pub(crate) fn decode_data(bytes: &[u8]) -> Option<IPCMessage> {
     }
     
     let mut decoded = DecodedData::from_bytes(&decoded_bytes).ok()?;
-    let msg_type = decoded.take_u32().ok()?;
+    let msg_type = decoded.take_u8().ok()?;
     
     match msg_type {
         0 => {
@@ -221,7 +209,7 @@ pub(crate) fn decode_data(bytes: &[u8]) -> Option<IPCMessage> {
 
 pub(crate) fn encode_evaluate(fn_id: u32, args_data: &EncodedData) -> Vec<u8> {
     let mut encoder = EncodedData::new();
-    encoder.push_u32(0); // Evaluate message type
+    encoder.push_u8(0); // Evaluate message type
     encoder.push_u32(fn_id);
     
     // Merge the args data
@@ -229,19 +217,6 @@ pub(crate) fn encode_evaluate(fn_id: u32, args_data: &EncodedData) -> Vec<u8> {
     encoder.u16_buf.extend_from_slice(&args_data.u16_buf);
     encoder.u32_buf.extend_from_slice(&args_data.u32_buf);
     encoder.str_buf.extend_from_slice(&args_data.str_buf);
-    
-    encoder.to_bytes()
-}
-
-pub(crate) fn encode_respond(response_data: &EncodedData) -> Vec<u8> {
-    let mut encoder = EncodedData::new();
-    encoder.push_u32(1); // Respond message type
-    
-    // Merge the response data
-    encoder.u8_buf.extend_from_slice(&response_data.u8_buf);
-    encoder.u16_buf.extend_from_slice(&response_data.u16_buf);
-    encoder.u32_buf.extend_from_slice(&response_data.u32_buf);
-    encoder.str_buf.extend_from_slice(&response_data.str_buf);
     
     encoder.to_bytes()
 }
