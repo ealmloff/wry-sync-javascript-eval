@@ -133,7 +133,7 @@ impl BinaryDecode for u32 {
 
 impl TypeConstructor for str {
     fn create_type_instance() -> String {
-        "new window.HeapRefType()".to_string()
+        "window.strType".to_string()
     }
 }
 
@@ -145,7 +145,7 @@ impl BinaryEncode for &str {
 
 impl TypeConstructor for String {
     fn create_type_instance() -> String {
-        "new window.HeapRefType()".to_string()
+        "window.strType".to_string()
     }
 }
 

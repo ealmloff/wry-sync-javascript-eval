@@ -40,6 +40,19 @@ class HeapRefType implements TypeClass {
 }
 
 /**
+ * Type class for string values with encoding/decoding methods
+ */
+class StringType implements TypeClass {
+  encode(encoder: DataEncoder, value: string): void {
+    encoder.pushStr(value);
+  }
+
+  decode(decoder: DataDecoder): string {
+    return decoder.takeStr();
+  }
+}
+
+/**
  * Type class for Rust callbacks with encoding/decoding methods
  */
 class CallbackType implements TypeClass {
@@ -150,7 +163,6 @@ function createWrapperFunction(
   returnType: TypeClass,
   jsFunction: (...args: any[]) => any
 ): (decoder: DataDecoder, encoder: DataEncoder) => void {
-  console.log("Creating wrapper function with param types:", paramTypes.map(pt => pt.constructor.name), "and return type:", returnType.constructor.name);
   return (decoder: DataDecoder, encoder: DataEncoder) => {
     // Decode parameters using their respective types
     const params = paramTypes.map(paramType => paramType.decode(decoder));
@@ -169,4 +181,7 @@ export const U16Type = new NumericType('u16');
 export const U32Type = new NumericType('u32');
 export const U64Type = new NumericType('u64');
 
-export { TypeClass, BoolType, HeapRefType, CallbackType, NullType, NumericType, OptionType, createWrapperFunction };
+// Pre-instantiated string type class
+export const strType = new StringType();
+
+export { TypeClass, BoolType, HeapRefType, CallbackType, NullType, NumericType, OptionType, StringType, createWrapperFunction };
