@@ -147,6 +147,25 @@ fn app(
     set_text: JSFunction<fn(JSHeapRef, String) -> ()>,
     get_body: JSFunction<fn() -> JSHeapRef>,
 ) {
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    let start = std::time::Instant::now();
+    for _ in 0..1000 {
+        let sum = add_numbers.call(123u32, 456u32);
+        if sum != 579 {
+            panic!("Incorrect sum: {}", sum);
+        }
+    }
+    let duration = start.elapsed();
+    println!(
+        "Performed 100 add_numbers calls in {:?} milliseconds",
+        duration.as_millis()
+    );
+    println!(
+        "Average time per call: {:?} milliseconds",
+        duration.as_millis() as f64 / 1000.0
+    );
+
+
     // Get document body
     let body: JSHeapRef = get_body.call(());
 
