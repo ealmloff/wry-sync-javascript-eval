@@ -95,7 +95,7 @@ class DataDecoder {
   private u32Buf: Uint32Array;
   private u32Offset: number;
 
-  private strBuf: Uint8Array;
+  private strBuf: string;
   private strOffset: number;
 
   constructor(data: ArrayBuffer) {
@@ -120,7 +120,8 @@ class DataDecoder {
     this.u8Offset = 0;
 
     // string buffer
-    this.strBuf = new Uint8Array(data, strByteOffset);
+    const strBuf = new Uint8Array(data, strByteOffset);
+    this.strBuf = new TextDecoder("utf-8").decode(strBuf);
     this.strOffset = 0;
   }
 
@@ -144,9 +145,9 @@ class DataDecoder {
 
   takeStr(): string {
     const len = this.takeU32();
-    const bytes = this.strBuf.subarray(this.strOffset, this.strOffset + len);
+    const str = this.strBuf.substring(this.strOffset, this.strOffset + len);
     this.strOffset += len;
-    return new TextDecoder("utf-8").decode(bytes);
+    return str;
   }
 }
 
