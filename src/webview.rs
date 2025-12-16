@@ -11,10 +11,11 @@ use winit::{
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::{Rect, RequestAsyncResponder, WebViewBuilder};
 
+use wry_bindgen::ipc::{DecodedVariant, IPCMessage, MessageType, decode_data};
+use wry_bindgen::runtime::get_runtime;
+
 use crate::FunctionRegistry;
-use crate::encoder::get_dom;
 use crate::home::root_response;
-use crate::ipc::{DecodedVariant, IPCMessage, MessageType, decode_data};
 
 fn decode_request_data(request: &wry::http::Request<Vec<u8>>) -> Option<IPCMessage> {
     if let Some(header_value) = request.headers().get("dioxus-data") {
@@ -58,6 +59,17 @@ impl ApplicationHandler<IPCMessage> for State {
                     responder.respond(root_response());
                     return;
                 }
+
+                // Serve inline_js modules from snippets/
+                if real_path.starts_with("snippets/") {
+                    if let Some(content) = crate::FUNCTION_REGISTRY.get_module(real_path) {
+                        responder.respond(module_response(content));
+                        return;
+                    }
+                    responder.respond(not_found_response());
+                    return;
+                }
+
                 let mut shared = shared.borrow_mut();
                 let Some(msg) = decode_request_data(&request) else {
                     responder.respond(error_response());
@@ -73,7 +85,7 @@ impl ApplicationHandler<IPCMessage> for State {
                             responder.respond(blank_response());
                         }
                     }
-                    get_dom().queue_rust_call(msg);
+                    get_runtime().queue_rust_call(msg);
                     return;
                 }
 
@@ -172,8 +184,8 @@ impl SharedWebviewState {
         if let OngoingRequestState::Pending(responder) = self.ongoing_request.take() {
             let ty = response.ty().unwrap();
             self.ongoing_request = match ty {
-                crate::ipc::MessageType::Evaluate => OngoingRequestState::Querying,
-                crate::ipc::MessageType::Respond => OngoingRequestState::Completed,
+                MessageType::Evaluate => OngoingRequestState::Querying,
+                MessageType::Respond => OngoingRequestState::Completed,
             };
 
             // Send binary response data
@@ -201,6 +213,21 @@ fn blank_response() -> wry::http::Response<Vec<u8>> {
         .status(200)
         .body(vec![])
         .expect("Failed to build blank response")
+}
+
+fn module_response(content: &str) -> wry::http::Response<Vec<u8>> {
+    wry::http::Response::builder()
+        .status(200)
+        .header("Content-Type", "application/javascript")
+        .body(content.as_bytes().to_vec())
+        .expect("Failed to build module response")
+}
+
+fn not_found_response() -> wry::http::Response<Vec<u8>> {
+    wry::http::Response::builder()
+        .status(404)
+        .body(b"Not Found".to_vec())
+        .expect("Failed to build not found response")
 }
 
 struct OngoingRustCall {

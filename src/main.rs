@@ -1,27 +1,31 @@
 use std::fmt::Write;
 use std::sync::LazyLock;
-use std::sync::RwLock;
-use std::sync::mpsc::Sender;
 use winit::event_loop::EventLoop;
-use winit::event_loop::EventLoopProxy;
 
-use crate::encoder::{
-    BatchState, JSFunction, JSHeapRef, batch, set_event_loop_proxy, wait_for_js_event,
-};
-use crate::ipc::IPCMessage;
+use wry_bindgen::prelude::*;
+
 use crate::webview::State;
 
 inventory::collect!(JsFunctionSpec);
 
-mod encoder;
 mod home;
-mod ipc;
 mod webview;
+pub mod bindings;
 
 pub struct JsFunctionSpec {
     pub name: &'static str,
     pub js_code: &'static str,
     pub type_info: fn() -> (Vec<String>, String),
+    /// Optional inline JS module content (ES module with exports)
+    pub inline_js: Option<InlineJsModule>,
+}
+
+/// Inline JS module info
+pub struct InlineJsModule {
+    /// The JS module content
+    pub content: &'static str,
+    /// The exported function name (js_name)
+    pub export_name: &'static str,
 }
 
 impl JsFunctionSpec {
@@ -29,120 +33,25 @@ impl JsFunctionSpec {
         name: &'static str,
         js_code: &'static str,
         type_info: fn() -> (Vec<String>, String),
+        inline_js: Option<InlineJsModule>,
     ) -> Self {
         Self {
             name,
             js_code,
             type_info,
+            inline_js,
         }
     }
 }
 
-pub(crate) struct DomEnv {
-    pub(crate) proxy: EventLoopProxy<IPCMessage>,
-    pub(crate) queued_rust_calls: RwLock<Vec<IPCMessage>>,
-    pub(crate) sender: RwLock<Option<Sender<IPCMessage>>>,
-}
-
-impl DomEnv {
-    fn new(proxy: EventLoopProxy<IPCMessage>) -> Self {
-        Self {
-            proxy,
-            queued_rust_calls: RwLock::new(Vec::new()),
-            sender: RwLock::new(None),
-        }
-    }
-
-    fn js_response(&self, responder: IPCMessage) {
-        let _ = self.proxy.send_event(responder);
-    }
-
-    fn queue_rust_call(&self, responder: IPCMessage) {
-        if let Some(sender) = self.sender.read().unwrap().as_ref() {
-            let _ = sender.send(responder);
-        } else {
-            self.queued_rust_calls.write().unwrap().push(responder);
-        }
-    }
-
-    fn set_sender(&self, sender: Sender<IPCMessage>) {
-        let mut queued = self.queued_rust_calls.write().unwrap();
-        *self.sender.write().unwrap() = Some(sender);
-        for call in queued.drain(..) {
-            if let Some(sender) = self.sender.read().unwrap().as_ref() {
-                let _ = sender.send(call);
-            }
-        }
+impl InlineJsModule {
+    pub const fn new(content: &'static str, export_name: &'static str) -> Self {
+        Self { content, export_name }
     }
 }
 
-macro_rules! js_type {
-    ($vis:vis type $name:ident;) => {
-        #[derive(Clone, Debug)]
-        $vis struct $name(JSHeapRef);
-
-        impl encoder::TypeConstructor for $name {
-            fn create_type_instance() -> String {
-                JSHeapRef::create_type_instance()
-            }
-        }
-
-        impl encoder::BinaryEncode for $name {
-            fn encode(self, encoder: &mut crate::ipc::EncodedData) {
-                self.0.encode(encoder);
-            }
-        }
-
-        impl encoder::BinaryDecode for $name {
-            fn decode(decoder: &mut crate::ipc::DecodedData) -> Result<Self, ()> {
-                JSHeapRef::decode(decoder).map(Self)
-            }
-        }
-
-        impl encoder::BatchableResult for $name {
-            fn needs_flush() -> bool {
-                false
-            }
-
-            fn batched_placeholder(batch: &mut BatchState) -> Self {
-                Self(JSHeapRef::batched_placeholder(batch))
-            }
-        }
-    };
-}
-
-macro_rules! js_function {
-    ($vis:vis fn $name:ident ($($arg_name:ident : $arg_type:ty),*) -> $ret_type:ty = $js_code:literal;) => {
-        $vis fn $name($($arg_name : $arg_type),*) -> $ret_type {
-            inventory::submit! {
-                JsFunctionSpec::new(
-                    stringify!($name),
-                    $js_code,
-                    || (vec![$(<$arg_type as encoder::TypeConstructor<_>>::create_type_instance()),*], <$ret_type as encoder::TypeConstructor>::create_type_instance())
-                )
-            }
-
-            let func: JSFunction<fn($($arg_type),*) -> $ret_type> = {
-                FUNCTION_REGISTRY.get_function(stringify!($name)).expect("Function not found in registry")
-            };
-            func.call($($arg_name),*)
-        }
-    };
-}
-
-js_type!(
-    pub type Element;
-);
-js_function!(pub fn console_log(msg: String) -> () = "(msg) => { console.log(msg); }";);
-js_function!(pub fn alert(msg: String) -> () = "(msg) => { alert(msg); }";);
-js_function!(pub fn add_numbers(a: u32, b: u32) -> u32 = "((a, b) => a + b)";);
-js_function!(pub fn add_event_listener(event: String, callback: Box<dyn FnMut() -> bool>) -> JSHeapRef = "((event, callback) => { window.addEventListener(event, callback); return callback; })";);
-js_function!(pub fn remove_event_listener(event: String, listener: JSHeapRef) -> () = "((event, listener) => { window.removeEventListener(event, listener); })";);
-js_function!(pub fn create_element(tag: String) -> Element = "(tag) => document.createElement(tag)";);
-js_function!(pub fn append_child(parent: Element, child: Element) -> () = "((parent, child) => { parent.appendChild(child); })";);
-js_function!(pub fn set_attribute(element: Element, attr: String, value: String) -> () = "((element, attr, value) => { element.setAttribute(attr, value); })";);
-js_function!(pub fn set_text(element: Element, text: String) -> () = "((element, text) => { element.textContent = text; })";);
-js_function!(pub fn get_body() -> Element = "(() => document.body)";);
+// Re-export bindings for convenience
+pub use bindings::{Element, alert, console_log, create_element, get_body};
 
 fn main() -> wry::Result<()> {
     #[cfg(any(
@@ -178,29 +87,66 @@ fn main() -> wry::Result<()> {
     Ok(())
 }
 
-struct FunctionRegistry {
+pub struct FunctionRegistry {
     functions: String,
     function_ids: Vec<JsFunctionId>,
+    /// Map of module path -> module content for inline_js modules
+    modules: std::collections::HashMap<String, &'static str>,
 }
 
 struct JsFunctionId {
     name: &'static str,
 }
 
-static FUNCTION_REGISTRY: LazyLock<FunctionRegistry> =
+pub static FUNCTION_REGISTRY: LazyLock<FunctionRegistry> =
     LazyLock::new(FunctionRegistry::collect_from_inventory);
 
 impl FunctionRegistry {
     fn collect_from_inventory() -> Self {
-        let mut script = String::from("window.setFunctionRegistry([");
         let mut function_ids = Vec::new();
-        for (i, spec) in inventory::iter::<JsFunctionSpec>().enumerate() {
+        let mut modules = std::collections::HashMap::new();
+
+        // First pass: collect all specs and module info
+        let specs: Vec<_> = inventory::iter::<JsFunctionSpec>().collect();
+
+        for spec in &specs {
+            let id = JsFunctionId { name: spec.name };
+            function_ids.push(id);
+
+            // Store module content for serving via custom protocol
+            if let Some(ref inline_js) = spec.inline_js {
+                let module_path = format!("snippets/{}.js", spec.name);
+                modules.insert(module_path, inline_js.content);
+            }
+        }
+
+        // Build the script - inline module content directly to avoid async issues
+        let mut script = String::new();
+        script.push_str("window.__wryModules = {};\n");
+
+        // Inline each module's content using IIFE to create module-like scope
+        for spec in &specs {
+            if let Some(ref inline_js) = spec.inline_js {
+                // Convert "export function foo" to "function foo" and capture exports
+                let module_code = inline_js.content.replace("export ", "");
+                write!(
+                    &mut script,
+                    "window.__wryModules[\"{}\"] = (() => {{ {}; return {{ {} }}; }})();\n",
+                    spec.name,
+                    module_code,
+                    inline_js.export_name
+                )
+                .unwrap();
+            }
+        }
+
+        // Now set up the function registry
+        script.push_str("window.setFunctionRegistry([");
+        for (i, spec) in specs.iter().enumerate() {
             if i > 0 {
                 script.push_str(",\n");
             }
             let (args, return_type) = (spec.type_info)();
-            let id = JsFunctionId { name: spec.name };
-            function_ids.push(id);
             write!(
                 &mut script,
                 "window.createWrapperFunction([{}], {}, {})",
@@ -211,9 +157,11 @@ impl FunctionRegistry {
             .unwrap();
         }
         script.push_str("]);");
+
         Self {
             functions: script,
             function_ids,
+            modules,
         }
     }
 
@@ -229,8 +177,13 @@ impl FunctionRegistry {
         None
     }
 
-    fn script(&self) -> &str {
+    pub(crate) fn script(&self) -> &str {
         &self.functions
+    }
+
+    /// Get the content of an inline_js module by path
+    pub fn get_module(&self, path: &str) -> Option<&'static str> {
+        self.modules.get(path).copied()
     }
 }
 
@@ -241,67 +194,63 @@ fn app() {
 
         // Create a container div
         let container = create_element("div".to_string());
-        set_attribute(container.clone(), "id".to_string(), "heap-demo".to_string());
-        set_attribute(container.clone(), "style".to_string(),
+        container.set_attribute("id".to_string(), "heap-demo".to_string());
+        container.set_attribute("style".to_string(),
         "margin: 20px; padding: 15px; border: 2px solid #4CAF50; border-radius: 8px; background: #f9f9f9;".to_string());
 
         // Create a heading
         let heading = create_element("h2".to_string());
-        set_text(heading.clone(), "JSHeap Demo".to_string());
-        set_attribute(
-            heading.clone(),
+        heading.set_text_content("JSHeap Demo".to_string());
+        heading.set_attribute(
             "style".to_string(),
             "color: #333; margin-top: 0;".to_string(),
         );
-        append_child(container.clone(), heading);
+        container.append_child(heading);
 
         // Create a counter display
         let counter_display = create_element("p".to_string());
-        set_attribute(
-            counter_display.clone(),
+        counter_display.set_attribute(
             "id".to_string(),
             "heap-counter".to_string(),
         );
-        set_attribute(
-            counter_display.clone(),
+        counter_display.set_attribute(
             "style".to_string(),
             "font-size: 24px; font-weight: bold; color: #2196F3;".to_string(),
         );
-        set_text(counter_display.clone(), "Counter: 0".to_string());
-        append_child(container.clone(), counter_display.clone());
+        counter_display.set_text_content("Counter: 0".to_string());
+        container.append_child(counter_display.clone());
 
         // Create a button
         let button = create_element("button".to_string());
-        set_text(button.clone(), "Click me (heap-managed)".to_string());
-        set_attribute(button.clone(), "id".to_string(), "heap-button".to_string());
-        set_attribute(button.clone(), "style".to_string(),
+        button.set_text_content("Click me (heap-managed)".to_string());
+        button.set_attribute("id".to_string(), "heap-button".to_string());
+        button.set_attribute("style".to_string(),
         "padding: 10px 20px; font-size: 16px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 4px;".to_string());
-        append_child(container.clone(), button);
+        container.append_child(button);
         // Append container to body
-        append_child(body, container);
+        body.append_child(container);
+
 
         let counter_ref = counter_display.clone();
         // Demo 4: Event handling with heap refs
         let mut count = 0;
-        let listener = add_event_listener(
+        body.add_event_listener(
             "click".to_string(),
             Box::new(move || {
                 count += 1;
 
                 // Update the counter display using the heap ref
                 let start = std::time::Instant::now();
-                set_text(counter_ref.clone(), format!("Counter: {}", count));
+                counter_ref.set_text_content(format!("Counter: {}", count));
                 let duration = start.elapsed();
                 println!(
                     "Updated counter display in {:?} microseconds",
                     duration.as_micros()
                 );
-
-                true
             }),
         );
     });
-    
+
     // Keep running to handle events
     wait_for_js_event::<()>();
 }

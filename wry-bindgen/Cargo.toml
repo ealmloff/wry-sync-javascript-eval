@@ -1,0 +1,12 @@
+[package]
+name = "wry-bindgen"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+base64 = "0.22"
+bytemuck = "1.14"
+inventory = "0.3.21"
+slotmap = "1.0"
+winit = "0.30"
+wry-bindgen-macro = { path = "../wry-bindgen-macro" }
