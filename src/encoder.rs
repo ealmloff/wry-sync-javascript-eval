@@ -453,23 +453,26 @@ fn run_js_sync<R: BatchableResult>(fn_id: u32, add_args: impl FnOnce(&mut Encode
     });
     add_operation(&mut batch, fn_id, add_args);
 
-    let placeholder = BATCH_STATE.with(|state| {
+    BATCH_STATE.with(|state| {
         let mut state = state.borrow_mut();
         let encoded_during_op = std::mem::replace(&mut state.encoder, batch);
         state.encoder.extend(&encoded_during_op);
-        // Get placeholder for types that don't need flush
-        // This also increments opaque_count to keep heap IDs in sync
-        if !R::needs_flush() {
-            Some(R::batched_placeholder(&mut state))
-        } else {
-            None
-        }
     });
-
-    // Step 2: If return value needed immediately OR not in batch mode, flush and return
-    if R::needs_flush() || !is_batching() {
-        return flush_and_return::<R>();
-    }
+    // Get placeholder for types that don't need flush
+    // This also increments opaque_count to keep heap IDs in sync
+    let result = if !R::needs_flush() {
+        let placeholder = BATCH_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            R::batched_placeholder(&mut state)
+        });
+        if !is_batching() {
+            flush_and_return::<R>()
+        } else {
+            placeholder
+        }
+    } else {
+        flush_and_return::<R>()
+    };
 
     // After running, free any queued IDs for this operation
     BATCH_STATE.with(|state| {
@@ -481,8 +484,7 @@ fn run_js_sync<R: BatchableResult>(fn_id: u32, add_args: impl FnOnce(&mut Encode
         }
     });
 
-    // Step 3: Return the placeholder (only reached in batch mode for non-flush types)
-    placeholder.expect("Placeholder should exist for non-flush types in batch mode")
+    result
 }
 
 /// Flush the current batch and return the decoded result.
