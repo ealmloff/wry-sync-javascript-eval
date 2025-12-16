@@ -2,6 +2,7 @@ use slotmap::{DefaultKey, Key, KeyData, SlotMap};
 use std::any::Any;
 use std::cell::RefCell;
 use std::marker::PhantomData;
+use std::rc::Rc;
 use std::sync::mpsc::Receiver;
 use std::sync::{OnceLock, mpsc};
 use winit::event_loop::EventLoopProxy;
@@ -9,11 +10,60 @@ use winit::event_loop::EventLoopProxy;
 use crate::DomEnv;
 use crate::ipc::{DecodedData, DecodedVariant, EncodedData, IPCMessage, MessageType};
 
+/// Reserved function ID for dropping heap refs on JS side.
+/// This should be handled specially in the JS runtime.
+pub const DROP_HEAP_REF_FN_ID: u32 = 0xFFFFFFFF;
+
+/// Inner type for JSHeapRef that holds the ID and implements Drop.
+/// When dropped, it releases the ID back to the free-list and queues
+/// a drop call to be sent to JS on the next flush.
+#[derive(Debug)]
+struct JSHeapRefInner {
+    id: u64,
+}
+
+impl Drop for JSHeapRefInner {
+    fn drop(&mut self) {
+        let drop: JSFunction<fn(u64) -> ()> = JSFunction::new(DROP_HEAP_REF_FN_ID);
+        drop.call(self.id);
+        BATCH_STATE.with(|state| {
+            state.borrow_mut().release_heap_id(self.id);
+        });
+    }
+}
+
 /// A reference to a JavaScript heap object, identified by a unique ID.
 /// References are encoded as u64 in the binary protocol.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+///
+/// This type is reference counted - when the last reference is dropped,
+/// the ID is released back to the free-list and the JS heap is notified.
+#[derive(Debug, Clone)]
 pub struct JSHeapRef {
-    id: u64,
+    inner: Rc<JSHeapRefInner>,
+}
+
+impl JSHeapRef {
+    /// Create a new JSHeapRef from an ID.
+    /// Used when decoding from JS or creating placeholders.
+    fn new(id: u64) -> Self {
+        Self {
+            inner: Rc::new(JSHeapRefInner { id }),
+        }
+    }
+}
+
+impl PartialEq for JSHeapRef {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner.id == other.inner.id
+    }
+}
+
+impl Eq for JSHeapRef {}
+
+impl std::hash::Hash for JSHeapRef {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.inner.id.hash(state);
+    }
 }
 
 /// Trait for creating a JavaScript type instance.
@@ -73,7 +123,7 @@ macro_rules! impl_needs_flush {
     };
 }
 
-impl_needs_flush!(bool, u8, u16, u32, String);
+impl_needs_flush!(bool, u8, u16, u32, u64, String);
 
 impl TypeConstructor for () {
     fn create_type_instance() -> String {
@@ -165,6 +215,18 @@ impl BinaryDecode for u32 {
     }
 }
 
+impl BinaryEncode for u64 {
+    fn encode(self, encoder: &mut EncodedData) {
+        encoder.push_u64(self);
+    }
+}
+
+impl BinaryDecode for u64 {
+    fn decode(decoder: &mut DecodedData) -> Result<Self, ()> {
+        decoder.take_u64()
+    }
+}
+
 impl TypeConstructor for str {
     fn create_type_instance() -> String {
         "window.strType".to_string()
@@ -236,15 +298,13 @@ impl TypeConstructor for JSHeapRef {
 
 impl BinaryEncode for JSHeapRef {
     fn encode(self, encoder: &mut EncodedData) {
-        encoder.push_u64(self.id);
+        encoder.push_u64(self.inner.id);
     }
 }
 
 impl BinaryDecode for JSHeapRef {
     fn decode(decoder: &mut DecodedData) -> Result<Self, ()> {
-        Ok(JSHeapRef {
-            id: decoder.take_u64()?,
-        })
+        Ok(JSHeapRef::new(decoder.take_u64()?))
     }
 }
 
@@ -254,9 +314,7 @@ impl BatchableResult for JSHeapRef {
     }
 
     fn batched_placeholder(batch: &mut BatchState) -> Self {
-        JSHeapRef {
-            id: batch.get_next_heap_id(),
-        }
+        JSHeapRef::new(batch.get_next_heap_id())
     }
 }
 
@@ -384,16 +442,25 @@ impl<T1, T2, T3, R: BatchableResult> JSFunction<fn(T1, T2, T3) -> R> {
 /// 3. Otherwise get the pending result from BatchableResult
 fn run_js_sync<R: BatchableResult>(fn_id: u32, add_args: impl FnOnce(&mut EncodedData)) -> R {
     // Step 1: Encode the operation into the batch and get placeholder for non-flush types
-    // IMPORTANT: We call batched_placeholder for ALL non-flush types
-    // because it tracks opaque allocations for heap ID synchronization
-    let placeholder = BATCH_STATE.with(|state| {
-        let mut batch = state.borrow_mut();
-        batch.add_operation(fn_id, add_args);
+    // We take the current encoder out of the thread-local state to avoid borrowing issues
+    // and then put it back after adding the operation. Drops or other calls may happen while
+    // we are encoding, but they should be queued after this operation.
+    let mut batch = BATCH_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        // Push a new operation into the batch
+        state.ids_to_free.push(Vec::new());
+        std::mem::take(&mut state.encoder)
+    });
+    add_operation(&mut batch, fn_id, add_args);
 
+    let placeholder = BATCH_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        let encoded_during_op = std::mem::replace(&mut state.encoder, batch);
+        state.encoder.extend(&encoded_during_op);
         // Get placeholder for types that don't need flush
         // This also increments opaque_count to keep heap IDs in sync
         if !R::needs_flush() {
-            Some(R::batched_placeholder(&mut batch))
+            Some(R::batched_placeholder(&mut state))
         } else {
             None
         }
@@ -403,6 +470,16 @@ fn run_js_sync<R: BatchableResult>(fn_id: u32, add_args: impl FnOnce(&mut Encode
     if R::needs_flush() || !is_batching() {
         return flush_and_return::<R>();
     }
+
+    // After running, free any queued IDs for this operation
+    BATCH_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        if let Some(ids) = state.ids_to_free.pop() {
+            for id in ids {
+                state.release_heap_id(id);
+            }
+        }
+    });
 
     // Step 3: Return the placeholder (only reached in batch mode for non-flush types)
     placeholder.expect("Placeholder should exist for non-flush types in batch mode")
@@ -505,11 +582,18 @@ pub(crate) fn get_dom() -> &'static DomEnv {
 
 /// State for batching operations.
 /// Every evaluation is a batch - it may just have one operation.
+///
+/// Uses a free-list strategy for heap ID allocation to stay in sync with JS heap.
 pub struct BatchState {
     /// The encoder accumulating batched operations
     encoder: EncodedData,
-    /// Track the next expected heap ID for placeholder allocation
-    next_heap_id: u64,
+    /// Stack of freed IDs available for reuse
+    free_ids: Vec<u64>,
+    /// Next ID to allocate if free_ids is empty
+    max_id: u64,
+    /// A stack of ongoing function encodings with the ids
+    /// that need to be freed after each one is done
+    ids_to_free: Vec<Vec<u64>>,
     /// Whether we're inside a batch() call
     is_batching: bool,
 }
@@ -518,7 +602,9 @@ impl BatchState {
     fn new() -> Self {
         Self {
             encoder: Self::new_encoder_for_evaluate(),
-            next_heap_id: 0,
+            free_ids: Vec::new(),
+            max_id: 0,
+            ids_to_free: Vec::new(),
             is_batching: false,
         }
     }
@@ -529,19 +615,28 @@ impl BatchState {
         encoder
     }
 
-    /// Get the next heap ID for placeholder allocation
+    /// Get the next heap ID for placeholder allocation.
+    /// Uses free-list strategy: reuses freed IDs first, then allocates new ones.
     fn get_next_heap_id(&mut self) -> u64 {
-        let id = self.next_heap_id;
-        self.next_heap_id += 1;
-        id
+        if let Some(id) = self.free_ids.pop() {
+            id
+        } else {
+            let id = self.max_id;
+            self.max_id += 1;
+            id
+        }
     }
 
-    fn add_operation(&mut self, fn_id: u32, add_args: impl FnOnce(&mut EncodedData)) {
-        self.encoder.push_u32(fn_id);
-        add_args(&mut self.encoder);
+    /// Release a heap ID back to the free-list and queue it for JS drop.
+    pub fn release_heap_id(&mut self, id: u64) {
+        match self.ids_to_free.last_mut() {
+            Some(ids) => ids.push(id),
+            None => self.free_ids.push(id),
+        }
     }
 
-    /// Take the message data and reset the batch for reuse
+    /// Take the message data and reset the batch for reuse.
+    /// Includes any pending drops at the start of the message.
     fn take_message(&mut self) -> IPCMessage {
         let msg = IPCMessage::new(self.encoder.to_bytes());
         self.encoder = Self::new_encoder_for_evaluate();
@@ -552,6 +647,11 @@ impl BatchState {
         // 12 bytes for offsets + 1 byte for message type
         self.encoder.byte_len() <= 13
     }
+}
+
+fn add_operation(encoder: &mut EncodedData, fn_id: u32, add_args: impl FnOnce(&mut EncodedData)) {
+    encoder.push_u32(fn_id);
+    add_args(encoder);
 }
 
 thread_local! {

@@ -159,6 +159,7 @@ impl<'a> DecodedData<'a> {
 }
 
 /// Encoder for building binary messages
+#[derive(Debug, Default)]
 pub(crate) struct EncodedData {
     u8_buf: Vec<u8>,
     u16_buf: Vec<u16>,
@@ -232,6 +233,13 @@ impl EncodedData {
         bytes.extend_from_slice(&self.str_buf);
 
         bytes
+    }
+
+    pub fn extend(&mut self, other: &EncodedData) {
+        self.u8_buf.extend_from_slice(&other.u8_buf);
+        self.u16_buf.extend_from_slice(&other.u16_buf);
+        self.u32_buf.extend_from_slice(&other.u32_buf);
+        self.str_buf.extend_from_slice(&other.str_buf);
     }
 }
 

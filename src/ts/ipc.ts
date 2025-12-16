@@ -20,6 +20,9 @@ enum MessageType {
   Respond = 1,
 }
 
+// Reserved function ID for dropping heap refs - must match Rust's DROP_HEAP_REF_FN_ID
+const DROP_HEAP_REF_FN_ID = 0xFFFFFFFF;
+
 /**
  * Sends binary data to Rust and receives binary response.
  */
@@ -91,6 +94,13 @@ function handleBinaryResponse(response: ArrayBuffer | null): unknown {
     // Process all operations
     while (decoder.hasMoreU32()) {
       const fnId = decoder.takeU32();
+
+      // Handle special drop function
+      if (fnId === DROP_HEAP_REF_FN_ID) {
+        const heapId = decoder.takeU64();
+        window.jsHeap.remove(heapId);
+        continue;
+      }
 
       const spec = window.functionRegistry[fnId];
       if (!spec) {

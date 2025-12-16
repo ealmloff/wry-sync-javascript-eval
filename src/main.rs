@@ -78,7 +78,7 @@ impl DomEnv {
 
 macro_rules! js_type {
     ($vis:vis type $name:ident;) => {
-        #[derive(Copy, Clone, Debug)]
+        #[derive(Clone, Debug)]
         $vis struct $name(JSHeapRef);
 
         impl encoder::TypeConstructor for $name {
@@ -259,46 +259,46 @@ fn app() {
 
         // Create a container div
         let container = create_element("div".to_string());
-        set_attribute(container, "id".to_string(), "heap-demo".to_string());
-        set_attribute(container, "style".to_string(),
+        set_attribute(container.clone(), "id".to_string(), "heap-demo".to_string());
+        set_attribute(container.clone(), "style".to_string(),
         "margin: 20px; padding: 15px; border: 2px solid #4CAF50; border-radius: 8px; background: #f9f9f9;".to_string());
 
         // Create a heading
         let heading = create_element("h2".to_string());
-        set_text(heading, "JSHeap Demo".to_string());
+        set_text(heading.clone(), "JSHeap Demo".to_string());
         set_attribute(
-            heading,
+            heading.clone(),
             "style".to_string(),
             "color: #333; margin-top: 0;".to_string(),
         );
-        append_child(container, heading);
+        append_child(container.clone(), heading);
 
         // Create a counter display
         let counter_display = create_element("p".to_string());
         set_attribute(
-            counter_display,
+            counter_display.clone(),
             "id".to_string(),
             "heap-counter".to_string(),
         );
         set_attribute(
-            counter_display,
+            counter_display.clone(),
             "style".to_string(),
             "font-size: 24px; font-weight: bold; color: #2196F3;".to_string(),
         );
-        set_text(counter_display, "Counter: 0".to_string());
-        append_child(container, counter_display);
+        set_text(counter_display.clone(), "Counter: 0".to_string());
+        append_child(container.clone(), counter_display.clone());
 
         // Create a button
         let button = create_element("button".to_string());
-        set_text(button, "Click me (heap-managed)".to_string());
-        set_attribute(button, "id".to_string(), "heap-button".to_string());
-        set_attribute(button, "style".to_string(),
+        set_text(button.clone(), "Click me (heap-managed)".to_string());
+        set_attribute(button.clone(), "id".to_string(), "heap-button".to_string());
+        set_attribute(button.clone(), "style".to_string(),
         "padding: 10px 20px; font-size: 16px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 4px;".to_string());
-        append_child(container, button);
+        append_child(container.clone(), button);
         // Append container to body
         append_child(body, container);
 
-        let counter_ref = counter_display;
+        let counter_ref = counter_display.clone();
         // Demo 4: Event handling with heap refs
         let mut count = 0;
         add_event_listener(
@@ -308,7 +308,7 @@ fn app() {
 
                 // Update the counter display using the heap ref
                 let start = std::time::Instant::now();
-                set_text(counter_ref, format!("Counter: {}", count));
+                set_text(counter_ref.clone(), format!("Counter: {}", count));
                 let duration = start.elapsed();
                 println!(
                     "Updated counter display in {:?} microseconds",
