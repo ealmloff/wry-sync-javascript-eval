@@ -1,6 +1,6 @@
 use slotmap::{DefaultKey, Key, KeyData, SlotMap};
 use std::any::Any;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::sync::mpsc::Receiver;
 use std::sync::{OnceLock, mpsc};
@@ -253,9 +253,9 @@ impl BatchableResult for JSHeapRef {
         false
     }
 
-    fn batched_placeholder(_: &mut BatchState) -> Self {
+    fn batched_placeholder(batch: &mut BatchState) -> Self {
         JSHeapRef {
-            id: get_next_heap_id(),
+            id: batch.get_next_heap_id(),
         }
     }
 }
@@ -508,13 +508,28 @@ pub(crate) fn get_dom() -> &'static DomEnv {
 pub struct BatchState {
     /// The encoder accumulating batched operations
     encoder: EncodedData,
+    /// Track the next expected heap ID for placeholder allocation
+    next_heap_id: u64,
+    /// Whether we're inside a batch() call
+    is_batching: bool,
 }
 
 impl BatchState {
     fn new() -> Self {
         let mut encoder = EncodedData::new();
         encoder.push_u8(MessageType::Evaluate as u8);
-        Self { encoder }
+        Self {
+            encoder,
+            next_heap_id: 0,
+            is_batching: false,
+        }
+    }
+
+    /// Get the next heap ID for placeholder allocation
+    fn get_next_heap_id(&mut self) -> u64 {
+        let id = self.next_heap_id;
+        self.next_heap_id += 1;
+        id
     }
 
     fn add_operation(&mut self, fn_id: u32, add_args: impl FnOnce(&mut EncodedData)) {
@@ -542,26 +557,11 @@ impl BatchState {
 thread_local! {
     /// Thread-local batch state - always exists, reset after each flush
     static BATCH_STATE: RefCell<BatchState> = RefCell::new(BatchState::new());
-
-    /// Track the next expected heap ID for placeholder allocation
-    static NEXT_HEAP_ID: Cell<u64> = const { Cell::new(0) };
-
-    /// Whether we're inside a batch() call
-    static IS_BATCHING: Cell<bool> = const { Cell::new(false) };
-}
-
-/// Get the next heap ID for placeholder allocation
-fn get_next_heap_id() -> u64 {
-    NEXT_HEAP_ID.with(|cell| {
-        let id = cell.get();
-        cell.set(id + 1);
-        id
-    })
 }
 
 /// Check if we're currently inside a batch() call
 fn is_batching() -> bool {
-    IS_BATCHING.get()
+    BATCH_STATE.with(|state| state.borrow().is_batching)
 }
 
 /// Execute operations inside a batch. Operations that return opaque types (like JSHeapRef)
@@ -569,7 +569,7 @@ fn is_batching() -> bool {
 /// flush the batch to get the actual result.
 pub fn batch<R, F: FnOnce() -> R>(f: F) -> R {
     // Start batching
-    IS_BATCHING.set(true);
+    BATCH_STATE.with(|state| state.borrow_mut().is_batching = true);
 
     // Execute the closure
     let result = f();
@@ -581,7 +581,7 @@ pub fn batch<R, F: FnOnce() -> R>(f: F) -> R {
     }
 
     // End batching
-    IS_BATCHING.set(false);
+    BATCH_STATE.with(|state| state.borrow_mut().is_batching = false);
 
     result
 }
