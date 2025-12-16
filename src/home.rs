@@ -1,6 +1,7 @@
 pub fn root_response() -> wry::http::Response<Vec<u8>> {
     // Serve the main HTML page
-    let html = format!(r#"<!DOCTYPE html>
+    let html = format!(
+        r#"<!DOCTYPE html>
 <html>
 <head>
     <title>Wry Test</title>
@@ -9,7 +10,9 @@ pub fn root_response() -> wry::http::Response<Vec<u8>> {
 <body>
     <h1 id="click-count">Button not clicked yet</h1>
 </body>
-</html>"#, include_str!("./js/main.js"));
+</html>"#,
+        include_str!("./js/main.js")
+    );
 
     wry::http::Response::builder()
         .header("Content-Type", "text/html")

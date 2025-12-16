@@ -13,13 +13,24 @@ pub enum MessageType {
 /// The binary format uses aligned buffers for efficient memory access:
 /// - First 12 bytes: three u32 offsets (u16_offset, u8_offset, str_offset)
 /// - u32 buffer: from byte 12 to u16_offset
-/// - u16 buffer: from u16_offset to u8_offset  
+/// - u16 buffer: from u16_offset to u8_offset
 /// - u8 buffer: from u8_offset to str_offset
 /// - string buffer: from str_offset to end
 ///
 /// Message format in the u8 buffer:
 /// - First u8: message type (0 = Evaluate, 1 = Respond)
 /// - Remaining data depends on message type
+///
+/// Evaluate format (supports batching - multiple operations in one message):
+/// - u8: message type (0)
+/// - For each operation (read until buffer exhausted):
+///   - u32: function ID
+///   - encoded arguments (varies by function)
+///
+/// Respond format:
+/// - u8: message type (1)
+/// - For each operation result:
+///   - encoded return value (varies by function)
 #[derive(Debug)]
 pub(crate) struct IPCMessage {
     data: Vec<u8>,
@@ -28,16 +39,6 @@ pub(crate) struct IPCMessage {
 impl IPCMessage {
     pub fn new(data: Vec<u8>) -> Self {
         Self { data }
-    }
-
-    pub fn new_evaluate(fn_id: u32, push_args: impl FnOnce(&mut EncodedData)) -> Self {
-        let mut encoder = EncodedData::new();
-        encoder.push_u8(MessageType::Evaluate as u8);
-        encoder.push_u32(fn_id);
-
-        push_args(&mut encoder);
-
-        IPCMessage::new(encoder.to_bytes())
     }
 
     pub fn new_respond(push_data: impl FnOnce(&mut EncodedData)) -> Self {
@@ -59,17 +60,12 @@ impl IPCMessage {
         }
     }
 
-    pub fn decoded(&self) -> Result<DecodedVariant, ()> {
+    pub fn decoded(&self) -> Result<DecodedVariant<'_>, ()> {
         let mut decoded = DecodedData::from_bytes(&self.data)?;
         let message_type = decoded.take_u8()?;
         let message_type = match message_type {
-            0 => DecodedVariant::Evaluate {
-                fn_id: decoded.take_u32()?,
-                data: decoded,
-            },
-            1 => DecodedVariant::Respond {
-                data: decoded,
-            },
+            0 => DecodedVariant::Evaluate { data: decoded },
+            1 => DecodedVariant::Respond { data: decoded },
             _ => return Err(()),
         };
         Ok(message_type)
@@ -85,13 +81,8 @@ impl IPCMessage {
 }
 
 pub enum DecodedVariant<'a> {
-    Respond {
-        data: DecodedData<'a>,
-    },
-    Evaluate {
-        fn_id: u32,
-        data: DecodedData<'a>,
-    },
+    Respond { data: DecodedData<'a> },
+    Evaluate { data: DecodedData<'a> },
 }
 
 /// Decoded binary data with aligned buffer access
@@ -149,6 +140,7 @@ impl<'a> DecodedData<'a> {
         self.u32_buf = rest;
         Ok(*first)
     }
+
     pub fn take_u64(&mut self) -> Result<u64, ()> {
         let low = self.take_u32()? as u64;
         let high = self.take_u32()? as u64;
@@ -182,6 +174,10 @@ impl EncodedData {
             u32_buf: Vec::new(),
             str_buf: Vec::new(),
         }
+    }
+
+    pub fn byte_len(&self) -> usize {
+        12 + self.u32_buf.len() * 4 + self.u16_buf.len() * 2 + self.u8_buf.len() + self.str_buf.len()
     }
 
     pub fn push_u8(&mut self, value: u8) {

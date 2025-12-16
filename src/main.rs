@@ -5,7 +5,9 @@ use std::sync::mpsc::Sender;
 use winit::event_loop::EventLoop;
 use winit::event_loop::EventLoopProxy;
 
-use crate::encoder::{JSFunction, JSHeapRef, set_event_loop_proxy, wait_for_js_event};
+use crate::encoder::{
+    BatchState, JSFunction, JSHeapRef, batch, set_event_loop_proxy, wait_for_js_event,
+};
 use crate::ipc::IPCMessage;
 use crate::webview::State;
 
@@ -96,6 +98,16 @@ macro_rules! js_type {
                 JSHeapRef::decode(decoder).map(Self)
             }
         }
+
+        impl encoder::BatchableResult for $name {
+            fn needs_flush() -> bool {
+                false
+            }
+
+            fn batched_placeholder(batch: &mut BatchState) -> Self {
+                Self(JSHeapRef::batched_placeholder(batch))
+            }
+        }
     };
 }
 
@@ -118,7 +130,9 @@ macro_rules! js_function {
     };
 }
 
-js_type!(pub type Element;);
+js_type!(
+    pub type Element;
+);
 js_function!(pub fn console_log(msg: String) -> () = "(msg) => { console.log(msg); }";);
 js_function!(pub fn alert(msg: String) -> () = "(msg) => { alert(msg); }";);
 js_function!(pub fn add_numbers(a: u32, b: u32) -> u32 = "((a, b) => a + b)";);
@@ -156,7 +170,7 @@ fn main() -> wry::Result<()> {
     set_event_loop_proxy(proxy);
     let registry = &*FUNCTION_REGISTRY;
 
-    std::thread::spawn(move || app());
+    std::thread::spawn(app);
     let mut state = State::new(registry);
     event_loop.run_app(&mut state).unwrap();
 
@@ -173,7 +187,7 @@ struct JsFunctionId {
 }
 
 static FUNCTION_REGISTRY: LazyLock<FunctionRegistry> =
-    LazyLock::new(|| FunctionRegistry::collect_from_inventory());
+    LazyLock::new(FunctionRegistry::collect_from_inventory);
 
 impl FunctionRegistry {
     fn collect_from_inventory() -> Self {
@@ -221,73 +235,73 @@ impl FunctionRegistry {
 
 fn app() {
     std::thread::sleep(std::time::Duration::from_secs(1));
-    let start = std::time::Instant::now();
-    for _ in 0..1000 {
-        let sum = add_numbers(123u32, 456u32);
-        if sum != 579 {
-            panic!("Incorrect sum: {}", sum);
+    // Store the counter display ref for use in the closure
+    let counter_ref = batch(|| {
+        let start = std::time::Instant::now();
+        for _ in 0..1000 {
+            let sum = add_numbers(123u32, 456u32);
+            if sum != 579 {
+                panic!("Incorrect sum: {}", sum);
+            }
         }
-    }
-    let duration = start.elapsed();
-    println!(
-        "Performed 100 add_numbers calls in {:?} milliseconds",
-        duration.as_millis()
-    );
-    println!(
-        "Average time per call: {:?} milliseconds",
-        duration.as_millis() as f64 / 1000.0
-    );
+        let duration = start.elapsed();
+        println!(
+            "Performed 100 add_numbers calls in {:?} milliseconds",
+            duration.as_millis()
+        );
+        println!(
+            "Average time per call: {:?} milliseconds",
+            duration.as_millis() as f64 / 1000.0
+        );
 
-    // Get document body
-    let body = get_body();
+        // Get document body
+        let body = get_body();
 
-    // Create a container div
-    let container = create_element("div".to_string());
-    set_attribute(container, "id".to_string(), "heap-demo".to_string());
-    set_attribute(container, "style".to_string(),
+        // Create a container div
+        let container = create_element("div".to_string());
+        set_attribute(container, "id".to_string(), "heap-demo".to_string());
+        set_attribute(container, "style".to_string(),
         "margin: 20px; padding: 15px; border: 2px solid #4CAF50; border-radius: 8px; background: #f9f9f9;".to_string());
 
-    // Create a heading
-    let heading = create_element("h2".to_string());
-    set_text(heading, "JSHeap Demo".to_string());
-    set_attribute(
-        heading,
-        "style".to_string(),
-        "color: #333; margin-top: 0;".to_string(),
-    );
-    append_child(container, heading);
+        // Create a heading
+        let heading = create_element("h2".to_string());
+        set_text(heading, "JSHeap Demo".to_string());
+        set_attribute(
+            heading,
+            "style".to_string(),
+            "color: #333; margin-top: 0;".to_string(),
+        );
+        append_child(container, heading);
 
-    // Create a counter display
-    let counter_display = create_element("p".to_string());
-    set_attribute(
-        counter_display,
-        "id".to_string(),
-        "heap-counter".to_string(),
-    );
-    set_attribute(
-        counter_display,
-        "style".to_string(),
-        "font-size: 24px; font-weight: bold; color: #2196F3;".to_string(),
-    );
-    set_text(counter_display, "Counter: 0".to_string());
-    append_child(container, counter_display);
+        // Create a counter display
+        let counter_display = create_element("p".to_string());
+        set_attribute(
+            counter_display,
+            "id".to_string(),
+            "heap-counter".to_string(),
+        );
+        set_attribute(
+            counter_display,
+            "style".to_string(),
+            "font-size: 24px; font-weight: bold; color: #2196F3;".to_string(),
+        );
+        set_text(counter_display, "Counter: 0".to_string());
+        append_child(container, counter_display);
 
-    // Create a button
-    let button = create_element("button".to_string());
-    set_text(button, "Click me (heap-managed)".to_string());
-    set_attribute(button, "id".to_string(), "heap-button".to_string());
-    set_attribute(button, "style".to_string(),
+        // Create a button
+        let button = create_element("button".to_string());
+        set_text(button, "Click me (heap-managed)".to_string());
+        set_attribute(button, "id".to_string(), "heap-button".to_string());
+        set_attribute(button, "style".to_string(),
         "padding: 10px 20px; font-size: 16px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 4px;".to_string());
-    append_child(container, button);
-    // Append container to body
-    append_child(body, container);
+        append_child(container, button);
+        // Append container to body
+        append_child(body, container);
 
+        counter_display
+    });
     // Demo 4: Event handling with heap refs
     let mut count = 0;
-
-    // Store the counter display ref for use in the closure
-    let counter_ref = counter_display;
-
     add_event_listener(
         "click".to_string(),
         Box::new(move || {

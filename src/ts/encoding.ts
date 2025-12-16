@@ -137,6 +137,14 @@ class DataDecoder {
     return this.u32Buf[this.u32Offset++];
   }
 
+  /**
+   * Check if there are more u32 values available to read.
+   * Used for iterating over batched operations.
+   */
+  hasMoreU32(): boolean {
+    return this.u32Offset < this.u32Buf.length;
+  }
+
   takeU64(): number {
     const low = this.takeU32();
     const high = this.takeU32();

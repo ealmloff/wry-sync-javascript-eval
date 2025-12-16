@@ -34,7 +34,7 @@ declare global {
   interface Window {
     functionRegistry: FunctionSpec[];
     setFunctionRegistry: (registry: FunctionSpec[]) => void;
-    evaluate_from_rust_binary: (fnId: number, dataBase64: string) => unknown;
+    evaluate_from_rust_binary: (dataBase64: string) => unknown;
     jsHeap: JSHeap;
     createWrapperFunction: typeof createWrapperFunction;
     BoolType: typeof BoolType;

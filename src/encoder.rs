@@ -1,26 +1,19 @@
 use slotmap::{DefaultKey, Key, KeyData, SlotMap};
 use std::any::Any;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::marker::PhantomData;
 use std::sync::mpsc::Receiver;
 use std::sync::{OnceLock, mpsc};
 use winit::event_loop::EventLoopProxy;
 
 use crate::DomEnv;
-use crate::ipc::{DecodedData, DecodedVariant, EncodedData, IPCMessage};
+use crate::ipc::{DecodedData, DecodedVariant, EncodedData, IPCMessage, MessageType};
 
 /// A reference to a JavaScript heap object, identified by a unique ID.
 /// References are encoded as u64 in the binary protocol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct JSHeapRef {
     id: u64,
-}
-
-impl JSHeapRef {
-    /// Get the raw ID of this heap reference
-    pub fn id(&self) -> u64 {
-        self.id
-    }
 }
 
 /// Trait for creating a JavaScript type instance.
@@ -40,6 +33,47 @@ pub(crate) trait BinaryEncode<P = ()> {
 pub(crate) trait BinaryDecode: Sized {
     fn decode(decoder: &mut DecodedData) -> Result<Self, ()>;
 }
+
+/// Trait for return types that can be used in batched JS calls.
+/// Determines how the type behaves during batching.
+pub trait BatchableResult: BinaryDecode + std::fmt::Debug{
+    /// Whether this result type requires flushing the batch to get the actual value.
+    /// Returns false for opaque types (placeholder) and trivial types (known value).
+    fn needs_flush() -> bool;
+
+    /// Get a placeholder/trivial value during batching.
+    /// For opaque types, this reserves a heap ID from the batch.
+    /// For trivial types like (), this returns the known value.
+    /// For types that need_flush, this is never called.
+    fn batched_placeholder(batch: &mut BatchState) -> Self;
+}
+
+impl BatchableResult for () {
+    fn needs_flush() -> bool {
+        false
+    }
+
+    fn batched_placeholder(_: &mut BatchState) -> Self {}
+}
+
+/// Implement BatchableResult for types that always need a flush to get the result.
+macro_rules! impl_needs_flush {
+    ($($ty:ty),*) => {
+        $(
+            impl BatchableResult for $ty {
+                fn needs_flush() -> bool {
+                    true
+                }
+
+                fn batched_placeholder(_batch: &mut BatchState) -> Self {
+                    unreachable!("needs_flush types should never call batched_placeholder")
+                }
+            }
+        )*
+    };
+}
+
+impl_needs_flush!(bool, u8, u16, u32, String);
 
 impl TypeConstructor for () {
     fn create_type_instance() -> String {
@@ -214,6 +248,18 @@ impl BinaryDecode for JSHeapRef {
     }
 }
 
+impl BatchableResult for JSHeapRef {
+    fn needs_flush() -> bool {
+        false
+    }
+
+    fn batched_placeholder(_: &mut BatchState) -> Self {
+        JSHeapRef {
+            id: get_next_heap_id(),
+        }
+    }
+}
+
 impl<T: TypeConstructor<P>, P> TypeConstructor<P> for Option<T> {
     fn create_type_instance() -> String {
         format!("new window.OptionType({})", T::create_type_instance())
@@ -285,13 +331,13 @@ impl<T> JSFunction<T> {
     }
 }
 
-impl<R: BinaryDecode> JSFunction<fn() -> R> {
+impl<R: BatchableResult> JSFunction<fn() -> R> {
     pub fn call(&self) -> R {
         run_js_sync::<R>(self.id, |_| {})
     }
 }
 
-impl<T1, R: BinaryDecode> JSFunction<fn(T1) -> R> {
+impl<T1, R: BatchableResult> JSFunction<fn(T1) -> R> {
     pub fn call<P1>(&self, arg: T1) -> R
     where
         T1: BinaryEncode<P1>,
@@ -302,7 +348,7 @@ impl<T1, R: BinaryDecode> JSFunction<fn(T1) -> R> {
     }
 }
 
-impl<T1, T2, R: BinaryDecode> JSFunction<fn(T1, T2) -> R> {
+impl<T1, T2, R: BatchableResult> JSFunction<fn(T1, T2) -> R> {
     pub fn call<P1, P2>(&self, arg1: T1, arg2: T2) -> R
     where
         T1: BinaryEncode<P1>,
@@ -315,7 +361,7 @@ impl<T1, T2, R: BinaryDecode> JSFunction<fn(T1, T2) -> R> {
     }
 }
 
-impl<T1, T2, T3, R: BinaryDecode> JSFunction<fn(T1, T2, T3) -> R> {
+impl<T1, T2, T3, R: BatchableResult> JSFunction<fn(T1, T2, T3) -> R> {
     pub fn call<P1, P2, P3>(&self, arg1: T1, arg2: T2, arg3: T3) -> R
     where
         T1: BinaryEncode<P1>,
@@ -330,102 +376,110 @@ impl<T1, T2, T3, R: BinaryDecode> JSFunction<fn(T1, T2, T3) -> R> {
     }
 }
 
-pub trait WrapJsFunction<P> {
-    fn function_args() -> impl IntoIterator<Item = String>;
-    fn return_type() -> String;
-}
+/// Core function for executing JavaScript calls.
+///
+/// For each call:
+/// 1. Encode the current evaluate message into the current batch
+/// 2. If the return value is needed immediately, flush the batch and return the result
+/// 3. Otherwise get the pending result from BatchableResult
+fn run_js_sync<R: BatchableResult>(fn_id: u32, add_args: impl FnOnce(&mut EncodedData)) -> R {
+    // Step 1: Encode the operation into the batch and get placeholder for non-flush types
+    // IMPORTANT: We call batched_placeholder for ALL non-flush types
+    // because it tracks opaque allocations for heap ID synchronization
+    let placeholder = BATCH_STATE.with(|state| {
+        let mut batch = state.borrow_mut();
+        batch.add_operation(fn_id, add_args);
 
-macro_rules! impl_wrap_js_function {
-    ( $([$T:ident, $P:ident]),* ) => {
-        impl<R, P, $($T, $P),*> WrapJsFunction<(P, $($P,)*)> for fn($($T),*) -> R
-        where
-            R: TypeConstructor<P>,
-            $(
-                $T: TypeConstructor<$P>,
-            )*
-        {
-            fn function_args() -> impl IntoIterator<Item = String> {
-                vec![$(
-                    $T::create_type_instance(),
-                )*]
-            }
-
-            fn return_type() -> String {
-                R::create_type_instance()
-            }
+        // Get placeholder for types that don't need flush
+        // This also increments opaque_count to keep heap IDs in sync
+        if !R::needs_flush() {
+            Some(R::batched_placeholder(&mut batch))
+        } else {
+            None
         }
-    };
+    });
+
+    // Step 2: If return value needed immediately OR not in batch mode, flush and return
+    if R::needs_flush() || !is_batching() {
+        return flush_and_return::<R>();
+    }
+
+    // Step 3: Return the placeholder (only reached in batch mode for non-flush types)
+    placeholder.expect("Placeholder should exist for non-flush types in batch mode")
 }
 
-impl_wrap_js_function!();
-impl_wrap_js_function!([T1, P1]);
-impl_wrap_js_function!([T1, P1], [T2, P2]);
-impl_wrap_js_function!([T1, P1], [T2, P2], [T3, P3]);
-impl_wrap_js_function!([T1, P1], [T2, P2], [T3, P3], [T4, P4]);
+/// Flush the current batch and return the decoded result.
+fn flush_and_return<R: BinaryDecode>() -> R {
+    let batch_msg = BATCH_STATE.with(|state| state.borrow_mut().take_message());
 
-fn run_js_sync<R: BinaryDecode>(fn_id: u32, add_args: impl FnOnce(&mut EncodedData)) -> R {
+    // Send and wait for result
     let proxy = &get_dom().proxy;
-    let data = IPCMessage::new_evaluate(fn_id, add_args);
+    let _ = proxy.send_event(batch_msg);
+    let result: R = wait_for_js_event();
 
-    _ = proxy.send_event(data);
-
-    wait_for_js_event()
+    result
 }
 
+/// Wait for a JS response, handling any Rust callbacks that occur during the wait.
 pub(crate) fn wait_for_js_event<R: BinaryDecode>() -> R {
     let env = EVENT_LOOP_PROXY.get().expect("Event loop proxy not set");
     THREAD_LOCAL_RECEIVER.with(|receiver| {
         while let Ok(response) = receiver.recv() {
-            // Skip the message type (first u32 after header)
             let decoder = response.decoded().expect("Failed to decode response");
             match decoder {
                 DecodedVariant::Respond { mut data } => {
                     return R::decode(&mut data).expect("Failed to decode return value");
                 }
-                DecodedVariant::Evaluate { fn_id, mut data } => {
-                    match fn_id {
-                        0 => {
-                            let key = KeyData::from_ffi(data.take_u64().unwrap() as u64).into();
-
-                            // Get the function from the thread-local encoder
-                            let function = THREAD_LOCAL_FUNCTION_ENCODER.with(|fn_encoder| {
-                                fn_encoder
-                                    .borrow_mut()
-                                    .functions
-                                    .get_mut(key)
-                                    .and_then(|f| f.take())
-                            });
-
-                            if let Some(mut function) = function {
-                                // Downcast to RustCallback and call it
-                                let function_callback = function
-                                    .downcast_mut::<RustCallback>()
-                                    .expect("Failed to downcast to RustCallback");
-
-                                let response = IPCMessage::new_respond(|encoder| {
-                                    (&mut function_callback.f)(&mut data, encoder);
-                                });
-
-                                env.js_response(response);
-
-                                // Insert it back into the thread-local encoder
-                                THREAD_LOCAL_FUNCTION_ENCODER.with(|fn_encoder| {
-                                    fn_encoder
-                                        .borrow_mut()
-                                        .functions
-                                        .get_mut(key)
-                                        .unwrap()
-                                        .replace(function);
-                                });
-                            }
-                        }
-                        _ => todo!(),
-                    }
+                DecodedVariant::Evaluate { mut data } => {
+                    handle_rust_callback(env, &mut data);
                 }
             }
         }
         panic!("Channel closed")
     })
+}
+
+/// Handle a Rust callback invocation from JavaScript.
+fn handle_rust_callback(env: &DomEnv, data: &mut DecodedData) {
+    let fn_id = data.take_u32().expect("Failed to read fn_id");
+    match fn_id {
+        0 => {
+            let key = KeyData::from_ffi(data.take_u64().unwrap()).into();
+
+            // Get the function from the thread-local encoder
+            let function = THREAD_LOCAL_FUNCTION_ENCODER.with(|fn_encoder| {
+                fn_encoder
+                    .borrow_mut()
+                    .functions
+                    .get_mut(key)
+                    .and_then(|f| f.take())
+            });
+
+            if let Some(mut function) = function {
+                // Downcast to RustCallback and call it
+                let function_callback = function
+                    .downcast_mut::<RustCallback>()
+                    .expect("Failed to downcast to RustCallback");
+
+                let response = IPCMessage::new_respond(|encoder| {
+                    (function_callback.f)(data, encoder);
+                });
+
+                env.js_response(response);
+
+                // Insert it back into the thread-local encoder
+                THREAD_LOCAL_FUNCTION_ENCODER.with(|fn_encoder| {
+                    fn_encoder
+                        .borrow_mut()
+                        .functions
+                        .get_mut(key)
+                        .unwrap()
+                        .replace(function);
+                });
+            }
+        }
+        _ => todo!(),
+    }
 }
 
 thread_local! {
@@ -447,4 +501,99 @@ pub(crate) fn set_event_loop_proxy(proxy: EventLoopProxy<IPCMessage>) {
 
 pub(crate) fn get_dom() -> &'static DomEnv {
     EVENT_LOOP_PROXY.get().expect("Event loop proxy not set")
+}
+
+/// State for batching operations.
+/// Every evaluation is a batch - it may just have one operation.
+pub struct BatchState {
+    /// The encoder accumulating batched operations
+    encoder: EncodedData,
+}
+
+impl BatchState {
+    fn new() -> Self {
+        let mut encoder = EncodedData::new();
+        encoder.push_u8(MessageType::Evaluate as u8);
+        Self { encoder }
+    }
+
+    fn add_operation(&mut self, fn_id: u32, add_args: impl FnOnce(&mut EncodedData)) {
+        self.encoder.push_u32(fn_id);
+        add_args(&mut self.encoder);
+    }
+
+    /// Take the message data and reset the batch for reuse
+    fn take_message(&mut self) -> IPCMessage {
+        let msg = IPCMessage::new(self.encoder.to_bytes());
+
+        // Reset for next batch
+        self.encoder = EncodedData::new();
+        self.encoder.push_u8(MessageType::Evaluate as u8);
+
+        msg
+    }
+    
+    fn is_empty(&self) -> bool {
+        // 12 bytes for offsets + 1 byte for message type
+        self.encoder.byte_len() <= 13
+    }
+}
+
+thread_local! {
+    /// Thread-local batch state - always exists, reset after each flush
+    static BATCH_STATE: RefCell<BatchState> = RefCell::new(BatchState::new());
+
+    /// Track the next expected heap ID for placeholder allocation
+    static NEXT_HEAP_ID: Cell<u64> = const { Cell::new(0) };
+
+    /// Whether we're inside a batch() call
+    static IS_BATCHING: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Get the next heap ID for placeholder allocation
+fn get_next_heap_id() -> u64 {
+    NEXT_HEAP_ID.with(|cell| {
+        let id = cell.get();
+        cell.set(id + 1);
+        id
+    })
+}
+
+/// Check if we're currently inside a batch() call
+fn is_batching() -> bool {
+    IS_BATCHING.get()
+}
+
+/// Execute operations inside a batch. Operations that return opaque types (like JSHeapRef)
+/// will be batched and executed together. Operations that return non-opaque types will
+/// flush the batch to get the actual result.
+pub fn batch<R, F: FnOnce() -> R>(f: F) -> R {
+    // Start batching
+    IS_BATCHING.set(true);
+
+    // Execute the closure
+    let result = f();
+
+    // Flush any remaining batched operations
+    let has_pending = BATCH_STATE.with(|state| !state.borrow().is_empty());
+    if has_pending {
+        flush_batch();
+    }
+
+    // End batching
+    IS_BATCHING.set(false);
+
+    result
+}
+
+/// Flush all pending batched operations and execute them
+fn flush_batch() {
+    let msg = BATCH_STATE.with(|state| state.borrow_mut().take_message());
+
+    // Send the batch and wait for response
+    let proxy = &get_dom().proxy;
+    let _ = proxy.send_event(msg);
+
+    // Wait for response (we don't need the result value, just confirmation)
+    wait_for_js_event::<()>();
 }

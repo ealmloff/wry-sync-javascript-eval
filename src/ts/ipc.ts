@@ -52,39 +52,23 @@ function sync_request_binary(
 
 /**
  * Entry point for Rust to call JS functions using binary protocol.
+ * Handles batched operations - reads and executes operations until buffer is exhausted.
  *
- * @param fnId - The function ID to call
- * @param dataBase64 - Base64 encoded binary data containing message
+ * @param dataBase64 - Base64 encoded binary data containing message with operations
  */
-function evaluate_from_rust_binary(fnId: number, dataBase64: string): unknown {
+function evaluate_from_rust_binary(dataBase64: string): unknown {
   // Decode base64 to ArrayBuffer
   const binary = atob(dataBase64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
     bytes[i] = binary.charCodeAt(i);
   }
-  const data = bytes.buffer;
-
-  // Decode the message
-  const decoder = new DataDecoder(data);
-  const msgType = decoder.takeU8(); // Should be 0 (Evaluate)
-  const decodedFnId = decoder.takeU32(); // Function ID
-
-  const spec = window.functionRegistry[fnId];
-  if (!spec) {
-    throw new Error("Unknown function ID: " + fnId);
-  }
-
-  const encoder = new DataEncoder();
-  encoder.pushU8(MessageType.Respond);
-  spec(decoder, encoder);
-
-  const response = sync_request_binary("wry://handler", encoder.finalize());
-  return handleBinaryResponse(response);
+  return handleBinaryResponse(bytes.buffer);
 }
 
 /**
  * Handle binary response from Rust.
+ * May contain nested Evaluate calls (for callbacks).
  */
 function handleBinaryResponse(response: ArrayBuffer | null): unknown {
   if (!response || response.byteLength === 0) {
@@ -99,17 +83,22 @@ function handleBinaryResponse(response: ArrayBuffer | null): unknown {
     // Respond - just return (caller will decode the value)
     return undefined;
   } else if (msgType === MessageType.Evaluate) {
-    // Evaluate - Rust is calling a JS function
-    const fnId = decoder.takeU32();
-
-    const spec = window.functionRegistry[fnId];
-    if (!spec) {
-      throw new Error("Unknown function ID in response: " + fnId);
-    }
+    // Evaluate - Rust is calling JS functions (possibly multiple)
 
     const encoder = new DataEncoder();
     encoder.pushU8(MessageType.Respond);
-    spec(decoder, encoder);
+
+    // Process all operations
+    while (decoder.hasMoreU32()) {
+      const fnId = decoder.takeU32();
+
+      const spec = window.functionRegistry[fnId];
+      if (!spec) {
+        throw new Error("Unknown function ID in response: " + fnId);
+      }
+
+      spec(decoder, encoder);
+    }
 
     const nextResponse = sync_request_binary(
       "wry://handler",

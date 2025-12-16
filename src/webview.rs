@@ -1,6 +1,7 @@
 use base64::Engine;
+use std::cell::RefCell;
 use std::fmt::Debug;
-use std::sync::{Arc, RwLock};
+use std::rc::Rc;
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -25,7 +26,7 @@ pub(crate) struct State {
     function_registry: &'static FunctionRegistry,
     window: Option<Window>,
     webview: Option<wry::WebView>,
-    shared: Arc<RwLock<SharedWebviewState>>,
+    shared: Rc<RefCell<SharedWebviewState>>,
 }
 
 impl State {
@@ -34,7 +35,7 @@ impl State {
             function_registry,
             window: None,
             webview: None,
-            shared: Arc::new(RwLock::new(SharedWebviewState::default())),
+            shared: Rc::new(RefCell::new(SharedWebviewState::default())),
         }
     }
 }
@@ -47,18 +48,17 @@ impl ApplicationHandler<IPCMessage> for State {
         let shared = self.shared.clone();
 
         let webview = WebViewBuilder::new()
-        .with_devtools(true)
+            .with_devtools(true)
             .with_asynchronous_custom_protocol("wry".into(), move |_, request, responder| {
                 // path is the string slice, request is the Request object
                 let real_path = request.uri().to_string().replace("wry://", "");
                 let real_path = real_path.as_str().trim_matches('/');
-                
-                
+
                 if real_path == "index" {
                     responder.respond(root_response());
                     return;
                 }
-                let mut shared = shared.write().unwrap();
+                let mut shared = shared.borrow_mut();
                 let Some(msg) = decode_request_data(&request) else {
                     responder.respond(error_response());
                     return;
@@ -83,7 +83,9 @@ impl ApplicationHandler<IPCMessage> for State {
             .build_as_child(&window)
             .unwrap();
 
-        webview.evaluate_script(self.function_registry.script()).unwrap();
+        webview
+            .evaluate_script(self.function_registry.script())
+            .unwrap();
         webview.open_devtools();
 
         self.window = Some(window);
@@ -112,15 +114,13 @@ impl ApplicationHandler<IPCMessage> for State {
             WindowEvent::CloseRequested => {
                 std::process::exit(0);
             }
-            _ => {
-            }
+            _ => {}
         }
     }
 
     fn user_event(&mut self, _: &ActiveEventLoop, event: IPCMessage) {
-        let mut shared = self.shared.write().unwrap();
-        
-        
+        let mut shared = self.shared.borrow_mut();
+
         if let OngoingRequestState::Pending(_) = &shared.ongoing_request {
             shared.respond_to_request(event);
             return;
@@ -128,14 +128,12 @@ impl ApplicationHandler<IPCMessage> for State {
 
         let decoded = event.decoded().unwrap();
 
-        if let DecodedVariant::Evaluate { fn_id, .. } = decoded {
+        if let DecodedVariant::Evaluate { .. } = decoded {
             // Encode the binary data as base64 and pass to JS
+            // JS will iterate over operations in the buffer
             let engine = base64::engine::general_purpose::STANDARD;
             let data_base64 = engine.encode(event.data());
-            let code = format!(
-                "window.evaluate_from_rust_binary({}, \"{}\")",
-                fn_id, data_base64
-            );
+            let code = format!("window.evaluate_from_rust_binary(\"{}\")", data_base64);
             self.webview
                 .as_ref()
                 .unwrap()
@@ -171,14 +169,13 @@ impl SharedWebviewState {
     }
 
     fn respond_to_request(&mut self, response: IPCMessage) {
-        
         if let OngoingRequestState::Pending(responder) = self.ongoing_request.take() {
             let ty = response.ty().unwrap();
             self.ongoing_request = match ty {
                 crate::ipc::MessageType::Evaluate => OngoingRequestState::Querying,
                 crate::ipc::MessageType::Respond => OngoingRequestState::Completed,
             };
-            
+
             // Send binary response data
             let body = response.into_data();
             responder.respond(
