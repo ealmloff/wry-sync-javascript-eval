@@ -59,7 +59,7 @@ class JSHeap {
       this.slots[id] = undefined;
       this.freeIds.push(id);
     } else {
-      console.log("[JS Heap] remove (already empty):", id);
+      console.log("[JS Heap] remove (already undefined):", id);
     }
     return value;
   }

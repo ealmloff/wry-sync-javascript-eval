@@ -1,9 +1,15 @@
+use wry_testing::set_on_log;
+
 mod add_number_js;
 mod callbacks;
 mod jsvalue;
 
 fn main() {
     wry_testing::run(|| {
+        set_on_log(Box::new(|msg: String| {
+            println!("[JS] {}", msg);
+        }));
+
         add_number_js::test_add_number_js();
         add_number_js::test_add_number_js_batch();
         callbacks::test_call_callback();
