@@ -499,11 +499,36 @@ impl_needs_flush!(
     bool, u8, u16, u32, u64, i8, i16, i32, i64, isize, usize, f32, f64, String
 );
 
-// Blanket implementation for references to types that implement BinaryEncode via clone
+/// Marker trait for types that can be cheaply cloned for encoding.
+pub trait CloneForEncode: Clone {}
+
+impl CloneForEncode for bool {}
+impl CloneForEncode for u8 {}
+impl CloneForEncode for u16 {}
+impl CloneForEncode for u32 {}
+impl CloneForEncode for u64 {}
+impl CloneForEncode for i8 {}
+impl CloneForEncode for i16 {}
+impl CloneForEncode for i32 {}
+impl CloneForEncode for i64 {}
+impl CloneForEncode for f32 {}
+impl CloneForEncode for f64 {}
+impl CloneForEncode for usize {}
+impl CloneForEncode for isize {}
+impl CloneForEncode for String {}
+
+// Blanket implementation for references to types that implement CloneForEncode
 // Note: We only implement for P=() to avoid conflicts with RustCallbackMarker impls
-impl<T: BinaryEncode + Clone> BinaryEncode for &T {
+impl<T: BinaryEncode + CloneForEncode> BinaryEncode for &T {
     fn encode(self, encoder: &mut EncodedData) {
         self.clone().encode(encoder);
+    }
+}
+
+// When encoding JsValue references, encode the underlying ID
+impl BinaryEncode for &JsValue {
+    fn encode(self, encoder: &mut EncodedData) {
+        encoder.push_u64(self.id());
     }
 }
 
