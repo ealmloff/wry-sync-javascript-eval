@@ -132,8 +132,9 @@ impl ApplicationHandler<AppEvent> for State {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
-            AppEvent::Shutdown => {
+            AppEvent::Shutdown(status) => {
                 event_loop.exit();
+                std::process::exit(status);
             }
             AppEvent::Ipc(ipc_msg) => {
                 let mut shared = self.shared.borrow_mut();

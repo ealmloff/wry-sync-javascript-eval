@@ -21,8 +21,8 @@ use crate::ipc::{DecodedData, DecodedVariant, IPCMessage};
 pub enum AppEvent {
     /// An IPC message from JavaScript
     Ipc(IPCMessage),
-    /// Request to shut down the application
-    Shutdown,
+    /// Request to shut down the application with a status code
+    Shutdown(i32),
 }
 
 /// The runtime environment for communicating with JavaScript.
@@ -50,9 +50,9 @@ impl WryRuntime {
         let _ = self.proxy.send_event(AppEvent::Ipc(responder));
     }
 
-    /// Request the application to shut down.
-    pub fn shutdown(&self) {
-        let _ = self.proxy.send_event(AppEvent::Shutdown);
+    /// Request the application to shut down with a status code.
+    pub fn shutdown(&self, status: i32) {
+        let _ = self.proxy.send_event(AppEvent::Shutdown(status));
     }
 
     /// Queue a Rust call from JavaScript.
@@ -87,12 +87,12 @@ pub fn set_event_loop_proxy(proxy: EventLoopProxy<AppEvent>) {
         .unwrap_or_else(|_| panic!("Event loop proxy already set"));
 }
 
-/// Request the application to shut down.
+/// Request the application to shut down with a status code.
 ///
 /// This sends a shutdown event through the event loop, which will cause
-/// the webview to close and the application to exit.
-pub fn shutdown() {
-    get_runtime().shutdown();
+/// the webview to close and the application to exit with the given status code.
+pub fn shutdown(status: i32) {
+    get_runtime().shutdown(status);
 }
 
 /// Get the runtime environment.

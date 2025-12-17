@@ -78,7 +78,7 @@ where
     // Spawn the app thread with panic handling - if the app panics, shut down the webview
     std::thread::spawn(move || {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(app));
-        if let Err(panic_info) = result {
+        let status = if let Err(panic_info) = result {
             eprintln!("App thread panicked, shutting down webview");
             // Try to print panic info
             if let Some(s) = panic_info.downcast_ref::<&str>() {
@@ -86,8 +86,11 @@ where
             } else if let Some(s) = panic_info.downcast_ref::<String>() {
                 eprintln!("Panic message: {}", s);
             }
-        }
-        shutdown();
+            1 // Exit with error status on panic
+        } else {
+            0 // Exit with success status on normal completion
+        };
+        shutdown(status);
     });
 
     let mut state = State::new(registry);
