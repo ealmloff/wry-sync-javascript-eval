@@ -72,6 +72,12 @@ impl<T: ?Sized> encode::BinaryEncode for Closure<T> {
     }
 }
 
+impl<T: ?Sized> encode::BinaryEncode for &Closure<T> {
+    fn encode(self, encoder: &mut ipc::EncodedData) {
+        (&self._value).encode(encoder);
+    }
+}
+
 // Re-export core types
 pub use cast::JsCast;
 pub use lazy::JsThreadLocal;

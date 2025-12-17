@@ -4,9 +4,11 @@
 //! to/from the binary IPC protocol.
 
 use crate::batch::BatchState;
+#[cfg(feature = "runtime")]
 use crate::function::{RustValue, register_value};
 use crate::ipc::{DecodeError, DecodedData, EncodedData};
 use crate::value::JsValue;
+#[cfg(feature = "runtime")]
 use slotmap::Key;
 use std::marker::PhantomData;
 
@@ -556,6 +558,7 @@ macro_rules! impl_fnmut_stub {
             }
         }
 
+        #[cfg(feature = "runtime")]
         impl<R: BinaryEncode<P>, P, F, $($arg,)*> BinaryEncode<RustCallbackMarker<(P, fn($($arg,)*) -> R)>> for F
         where
             F: FnMut($($arg),*) -> R + 'static,
