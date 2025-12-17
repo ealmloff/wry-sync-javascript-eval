@@ -30,6 +30,10 @@ extern "C" {
     #[wasm_bindgen(method, setter, js_class = "Element", js_name = textContent)]
     pub fn set_text_content(this: &Element, text: String);
 
+    /// Add an event listener to an element
+    #[wasm_bindgen(method, js_class = "Element", js_name = addEventListener)]
+    pub fn add_event_listener(this: &Element, event: String, listener: Box<dyn FnMut()>);
+
 }
 
 #[wasm_bindgen(inline_js = "export function add(a, b) { return a + b; }")]
@@ -39,24 +43,30 @@ extern "C" {
     pub fn add_numbers(a: u32, b: u32) -> u32;
 }
 
-
-#[wasm_bindgen(inline_js = "export function get_body() { return document.body; }")]
+#[wasm_bindgen]
 extern "C" {
-    /// Get the document body
-    #[wasm_bindgen(js_name = get_body)]
-    pub fn get_body() -> Element;
-}
+    /// The window type
+    pub type Window;
 
-#[wasm_bindgen(inline_js = "export function create_element(tag) { return document.createElement(tag); }")]
-extern "C" {
-    /// Create a new element with the given tag name
-    #[wasm_bindgen(js_name = create_element)]
-    pub fn create_element(tag: String) -> Element;
+    /// The global window object (lazily initialized)
+    #[wasm_bindgen(thread_local_v2, js_name = window)]
+    pub static WINDOW: Window;
+
+    /// Get the document
+    #[wasm_bindgen(method, getter, js_class = "Window", js_name = document)]
+    pub fn document(this: &Window) -> Document;
 }
 
 #[wasm_bindgen]
 extern "C" {
-    /// Add an event listener to an element
-    #[wasm_bindgen(method, js_class = "Element", js_name = addEventListener)]
-    pub fn add_event_listener(this: &Element, event: String, listener: Box<dyn FnMut()>);
+    /// The document type
+    pub type Document;
+
+    /// Get the body element
+    #[wasm_bindgen(method, getter, js_class = "Document", js_name = body)]
+    pub fn body(this: &Document) -> Element;
+
+    /// Create a new element with the given tag name
+    #[wasm_bindgen(method, js_class = "Document", js_name = createElement)]
+    pub fn create_element(this: &Document, tag: String) -> Element;
 }

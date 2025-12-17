@@ -3,7 +3,7 @@
 //! This module generates Rust code that uses the wry-bindgen runtime
 //! and inventory-based function registration.
 
-use crate::ast::{ImportFunction, ImportFunctionKind, ImportType, Program};
+use crate::ast::{ImportFunction, ImportFunctionKind, ImportStatic, ImportType, Program};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
@@ -19,6 +19,11 @@ pub fn generate(program: &Program) -> syn::Result<TokenStream> {
     // Generate function definitions
     for func in &program.functions {
         tokens.extend(generate_function(func)?);
+    }
+
+    // Generate static definitions
+    for st in &program.statics {
+        tokens.extend(generate_static(st)?);
     }
 
     Ok(tokens)
@@ -414,5 +419,86 @@ fn extract_type_name(ty: &syn::Type) -> syn::Result<&syn::Ident> {
             })
         }
         _ => Err(syn::Error::new_spanned(ty, "unsupported receiver type")),
+    }
+}
+
+/// Generate code for an imported static
+fn generate_static(st: &ImportStatic) -> syn::Result<TokenStream> {
+    let vis = &st.vis;
+    let rust_name = &st.rust_name;
+    let ty = &st.ty;
+
+    // Generate registry name for the static accessor
+    let registry_name = format!("__static_{}", rust_name);
+
+    // Generate JavaScript code to access the static
+    let js_code = generate_static_js_code(st);
+
+    // Generate the type constructor for the return type
+    let ret_type_constructor = quote! { <#ty as wry_bindgen::TypeConstructor<_>>::create_type_instance() };
+
+    if st.thread_local_v2 {
+        // Generate a lazily-initialized thread-local static
+        Ok(quote! {
+            inventory::submit! {
+                crate::JsFunctionSpec::new(
+                    #registry_name,
+                    #js_code,
+                    || (vec![] as Vec<String>, #ret_type_constructor),
+                    None
+                )
+            }
+
+            #vis static #rust_name: wry_bindgen::JsThreadLocal<#ty> = {
+                fn init() -> #ty {
+                    // Look up the accessor function at runtime
+                    let func: wry_bindgen::JSFunction<fn() -> #ty> =
+                        crate::FUNCTION_REGISTRY
+                            .get_function(#registry_name)
+                            .expect(concat!("Static accessor not found: ", #registry_name));
+
+                    // Call the accessor to get the value
+                    func.call()
+                }
+                wry_bindgen::__wry_bindgen_thread_local!(#ty = init())
+            };
+        })
+    } else {
+        // For non-thread-local statics, generate a regular function accessor
+        // This matches the behavior of wasm-bindgen without thread_local_v2 attribute
+        Ok(quote! {
+            inventory::submit! {
+                crate::JsFunctionSpec::new(
+                    #registry_name,
+                    #js_code,
+                    || (vec![] as Vec<String>, #ret_type_constructor),
+                    None
+                )
+            }
+
+            #vis fn #rust_name() -> #ty {
+                // Look up the accessor function at runtime
+                let func: wry_bindgen::JSFunction<fn() -> #ty> =
+                    crate::FUNCTION_REGISTRY
+                        .get_function(#registry_name)
+                        .expect(concat!("Static accessor not found: ", #registry_name));
+
+                // Call the accessor to get the value
+                func.call()
+            }
+        })
+    }
+}
+
+/// Generate JavaScript code to access a static value
+fn generate_static_js_code(st: &ImportStatic) -> String {
+    let js_name = &st.js_name;
+
+    // Build the full path with namespace if present
+    if let Some(ref namespace) = st.js_namespace {
+        let namespace_path = namespace.join(".");
+        format!("() => {}.{}", namespace_path, js_name)
+    } else {
+        format!("() => {}", js_name)
     }
 }

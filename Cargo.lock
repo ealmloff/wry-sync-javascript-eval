@@ -3579,6 +3579,7 @@ dependencies = [
  "base64",
  "bytemuck",
  "inventory",
+ "once_cell",
  "slotmap",
  "winit",
  "wry-bindgen-macro",

@@ -4,13 +4,13 @@ use winit::event_loop::EventLoop;
 
 use wry_bindgen::prelude::*;
 
-use crate::webview::State;
+use crate::{bindings::WINDOW, webview::State};
 
 inventory::collect!(JsFunctionSpec);
 
+pub mod bindings;
 mod home;
 mod webview;
-pub mod bindings;
 
 pub struct JsFunctionSpec {
     pub name: &'static str,
@@ -46,12 +46,15 @@ impl JsFunctionSpec {
 
 impl InlineJsModule {
     pub const fn new(content: &'static str, export_name: &'static str) -> Self {
-        Self { content, export_name }
+        Self {
+            content,
+            export_name,
+        }
     }
 }
 
 // Re-export bindings for convenience
-pub use bindings::{Element, alert, console_log, create_element, get_body};
+pub use bindings::{Element, alert, console_log};
 
 fn main() -> wry::Result<()> {
     #[cfg(any(
@@ -132,9 +135,7 @@ impl FunctionRegistry {
                 write!(
                     &mut script,
                     "window.__wryModules[\"{}\"] = (() => {{ {}; return {{ {} }}; }})();\n",
-                    spec.name,
-                    module_code,
-                    inline_js.export_name
+                    spec.name, module_code, inline_js.export_name
                 )
                 .unwrap();
             }
@@ -189,17 +190,18 @@ impl FunctionRegistry {
 
 fn app() {
     batch(|| {
-        // Get document body
-        let body = get_body();
+        // Get document body using the lazily-initialized WINDOW static
+        let document = WINDOW.with(|window| window.document());
+        let body = document.body();
 
         // Create a container div
-        let container = create_element("div".to_string());
+        let container = document.create_element("div".to_string());
         container.set_attribute("id".to_string(), "heap-demo".to_string());
         container.set_attribute("style".to_string(),
         "margin: 20px; padding: 15px; border: 2px solid #4CAF50; border-radius: 8px; background: #f9f9f9;".to_string());
 
         // Create a heading
-        let heading = create_element("h2".to_string());
+        let heading = document.create_element("h2".to_string());
         heading.set_text_content("JSHeap Demo".to_string());
         heading.set_attribute(
             "style".to_string(),
@@ -208,11 +210,8 @@ fn app() {
         container.append_child(heading);
 
         // Create a counter display
-        let counter_display = create_element("p".to_string());
-        counter_display.set_attribute(
-            "id".to_string(),
-            "heap-counter".to_string(),
-        );
+        let counter_display = document.create_element("p".to_string());
+        counter_display.set_attribute("id".to_string(), "heap-counter".to_string());
         counter_display.set_attribute(
             "style".to_string(),
             "font-size: 24px; font-weight: bold; color: #2196F3;".to_string(),
@@ -221,7 +220,7 @@ fn app() {
         container.append_child(counter_display.clone());
 
         // Create a button
-        let button = create_element("button".to_string());
+        let button = document.create_element("button".to_string());
         button.set_text_content("Click me (heap-managed)".to_string());
         button.set_attribute("id".to_string(), "heap-button".to_string());
         button.set_attribute("style".to_string(),
@@ -229,7 +228,6 @@ fn app() {
         container.append_child(button);
         // Append container to body
         body.append_child(container);
-
 
         let counter_ref = counter_display.clone();
         // Demo 4: Event handling with heap refs

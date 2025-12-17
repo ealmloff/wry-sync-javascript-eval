@@ -38,6 +38,8 @@ pub struct BindgenAttrs {
     pub typescript_type: Option<(Span, String)>,
     /// The `inline_js` attribute - inline JavaScript code
     pub inline_js: Option<(Span, String)>,
+    /// The `thread_local_v2` attribute - marks a static as lazily initialized
+    pub thread_local_v2: Option<Span>,
 }
 
 impl BindgenAttrs {
@@ -75,6 +77,11 @@ impl BindgenAttrs {
     pub fn is_structural(&self) -> bool {
         self.structural.is_some()
     }
+
+    /// Check if this is a thread-local static
+    pub fn is_thread_local_v2(&self) -> bool {
+        self.thread_local_v2.is_some()
+    }
 }
 
 /// A single attribute within wasm_bindgen(...)
@@ -93,6 +100,7 @@ enum BindgenAttr {
     Variadic(Span),
     TypescriptType(Span, String),
     InlineJs(Span, String),
+    ThreadLocalV2(Span),
 }
 
 impl Parse for BindgenAttr {
@@ -107,6 +115,7 @@ impl Parse for BindgenAttr {
             "constructor" => Ok(BindgenAttr::Constructor(span)),
             "catch" => Ok(BindgenAttr::Catch(span)),
             "variadic" => Ok(BindgenAttr::Variadic(span)),
+            "thread_local_v2" => Ok(BindgenAttr::ThreadLocalV2(span)),
 
             "js_name" => {
                 input.parse::<Token![=]>()?;
@@ -302,6 +311,12 @@ pub fn parse_attrs(attr: TokenStream) -> syn::Result<BindgenAttrs> {
                     return Err(syn::Error::new(span, "duplicate `inline_js` attribute"));
                 }
                 result.inline_js = Some((span, js));
+            }
+            BindgenAttr::ThreadLocalV2(span) => {
+                if result.thread_local_v2.is_some() {
+                    return Err(syn::Error::new(span, "duplicate `thread_local_v2` attribute"));
+                }
+                result.thread_local_v2 = Some(span);
             }
         }
     }

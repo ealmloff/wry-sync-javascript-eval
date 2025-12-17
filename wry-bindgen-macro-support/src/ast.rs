@@ -12,6 +12,8 @@ pub struct Program {
     pub types: Vec<ImportType>,
     /// Imported functions
     pub functions: Vec<ImportFunction>,
+    /// Imported statics (global values)
+    pub statics: Vec<ImportStatic>,
 }
 
 /// An imported JavaScript type
@@ -103,6 +105,23 @@ pub enum ImportFunctionKind {
     },
 }
 
+/// An imported JavaScript static value (global)
+#[derive(Debug)]
+pub struct ImportStatic {
+    /// Visibility of the static
+    pub vis: Visibility,
+    /// Rust name for the static
+    pub rust_name: Ident,
+    /// JavaScript name (may differ from rust_name)
+    pub js_name: String,
+    /// The type of the static value
+    pub ty: Type,
+    /// JavaScript namespace (if any)
+    pub js_namespace: Option<Vec<String>>,
+    /// Whether this uses thread_local_v2 lazy initialization
+    pub thread_local_v2: bool,
+}
+
 /// Parse a syn::Item into our AST
 pub fn parse_item(
     program: &mut Program,
@@ -154,10 +173,16 @@ fn parse_foreign_mod(
                 let ty = parse_foreign_type(t, type_attrs)?;
                 program.types.push(ty);
             }
+            syn::ForeignItem::Static(s) => {
+                // Parse per-static attributes
+                let static_attrs = extract_wasm_bindgen_attrs(&s.attrs)?;
+                let st = parse_foreign_static(s, static_attrs)?;
+                program.statics.push(st);
+            }
             _ => {
                 return Err(syn::Error::new_spanned(
                     item,
-                    "only functions and types are supported in extern blocks",
+                    "only functions, types, and statics are supported in extern blocks",
                 ));
             }
         }
@@ -211,6 +236,9 @@ fn extract_wasm_bindgen_attrs(attrs: &[syn::Attribute]) -> syn::Result<BindgenAt
             }
             if let Some(v) = parsed.typescript_type {
                 combined.typescript_type = Some(v);
+            }
+            if let Some(span) = parsed.thread_local_v2 {
+                combined.thread_local_v2 = Some(span);
             }
         }
     }
@@ -352,5 +380,37 @@ fn parse_foreign_type(
         js_name,
         extends,
         typescript_type,
+    })
+}
+
+/// Parse a foreign static declaration
+fn parse_foreign_static(
+    s: syn::ForeignItemStatic,
+    attrs: BindgenAttrs,
+) -> syn::Result<ImportStatic> {
+    // Mutable statics are not supported
+    if let syn::StaticMutability::Mut(_) = s.mutability {
+        return Err(syn::Error::new_spanned(
+            s.mutability,
+            "cannot import mutable statics",
+        ));
+    }
+
+    let rust_name = s.ident.clone();
+    let js_name = attrs
+        .js_name()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| rust_name.to_string());
+
+    let js_namespace = attrs.js_namespace.as_ref().map(|(_, v)| v.clone());
+    let thread_local_v2 = attrs.is_thread_local_v2();
+
+    Ok(ImportStatic {
+        vis: s.vis,
+        rust_name,
+        js_name,
+        ty: *s.ty,
+        js_namespace,
+        thread_local_v2,
     })
 }
