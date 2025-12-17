@@ -150,6 +150,12 @@ fn generate_type(ty: &ImportType, krate: &TokenStream) -> syn::Result<TokenStrea
                 self.obj.encode(encoder);
             }
         }
+
+        impl #krate::BinaryEncode for &#rust_name {
+            fn encode(self, encoder: &mut #krate::EncodedData) {
+                (&self.obj).encode(encoder);
+            }
+        }
     };
 
     // Generate BinaryDecode implementation
