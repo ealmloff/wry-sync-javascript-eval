@@ -362,9 +362,9 @@ fn generate_args(func: &ImportFunction) -> syn::Result<GeneratedArgs> {
         ImportFunctionKind::Method { .. }
         | ImportFunctionKind::Getter { .. }
         | ImportFunctionKind::Setter { .. } => {
-            fn_types.push(quote! { wry_bindgen::JsValue });
-            call_values.push(quote! { self.0.clone() });
-            type_constructors.push(quote! { <wry_bindgen::JsValue as wry_bindgen::TypeConstructor<_>>::create_type_instance() });
+            fn_types.push(quote! { &wry_bindgen::JsValue });
+            call_values.push(quote! { &self.0 });
+            type_constructors.push(quote! { <&wry_bindgen::JsValue as wry_bindgen::TypeConstructor<_>>::create_type_instance() });
         }
         _ => {}
     }

@@ -232,6 +232,12 @@ impl TypeConstructor for JsValue {
     }
 }
 
+impl TypeConstructor for &JsValue {
+    fn create_type_instance() -> String {
+        <JsValue as TypeConstructor>::create_type_instance()
+    }
+}
+
 impl BinaryEncode for JsValue {
     fn encode(self, encoder: &mut EncodedData) {
         encoder.push_u64(self.id());
