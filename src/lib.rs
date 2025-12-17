@@ -18,7 +18,7 @@ pub use bindings::{Element, Document, Window, WINDOW, alert, console_log};
 pub use bindings::{set_on_log};
 
 // Re-export prelude items that apps need
-pub use wasm_bindgen::prelude::{batch, set_event_loop_proxy, wait_for_js_event, shutdown, AppEvent};
+pub use wasm_bindgen::prelude::{batch, set_event_loop_proxy, wait_for_js_result, shutdown, AppEvent};
 pub use wasm_bindgen::JsValue;
 
 /// Run a webview application with the given app function.

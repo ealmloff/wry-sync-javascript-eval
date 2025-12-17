@@ -112,21 +112,29 @@ thread_local! {
 }
 
 /// Wait for a JS response, handling any Rust callbacks that occur during the wait.
-pub fn wait_for_js_event<R: BinaryDecode>() -> R {
+pub fn wait_for_js_result<R: BinaryDecode>() -> R {
+    loop {
+        if let Some(result) = wait_for_js_event::<R>() {
+            return result;
+        }
+    }
+}
+
+pub fn wait_for_js_event<R: BinaryDecode>() -> Option<R> {
     let runtime = get_runtime();
     THREAD_LOCAL_RECEIVER.with(|receiver| {
-        while let Ok(response) = receiver.recv() {
+        if let Ok(response) = receiver.recv() {
             let decoder = response.decoded().expect("Failed to decode response");
             match decoder {
                 DecodedVariant::Respond { mut data } => {
-                    return R::decode(&mut data).expect("Failed to decode return value");
+                    return Some(R::decode(&mut data).expect("Failed to decode return value"));
                 }
                 DecodedVariant::Evaluate { mut data } => {
                     handle_rust_callback(runtime, &mut data);
                 }
             }
         }
-        panic!("Channel closed")
+        None
     })
 }
 

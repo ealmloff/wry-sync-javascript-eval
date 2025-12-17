@@ -213,7 +213,7 @@ pub(crate) fn flush_and_return<R: BinaryDecode>() -> R {
     // Send and wait for result
     let runtime = get_runtime();
     let _ = runtime.proxy.send_event(AppEvent::Ipc(batch_msg));
-    let result: R = crate::runtime::wait_for_js_event();
+    let result: R = crate::runtime::wait_for_js_result();
 
     result
 }

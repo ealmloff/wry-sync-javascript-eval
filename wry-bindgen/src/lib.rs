@@ -84,7 +84,7 @@ pub use ipc::{
     DecodeError, DecodedData, DecodedVariant, EncodedData, IPCMessage, MessageType, decode_data,
 };
 #[cfg(feature = "runtime")]
-pub use runtime::{WryRuntime, get_runtime, set_event_loop_proxy, wait_for_js_event};
+pub use runtime::{WryRuntime, get_runtime, set_event_loop_proxy, wait_for_js_result};
 
 // Re-export the macro
 pub use wry_bindgen_macro::wasm_bindgen;
@@ -298,7 +298,7 @@ pub mod prelude {
     pub use crate::function::JSFunction;
     pub use crate::lazy::JsThreadLocal;
     #[cfg(feature = "runtime")]
-    pub use crate::runtime::{set_event_loop_proxy, wait_for_js_event, shutdown, AppEvent};
+    pub use crate::runtime::{set_event_loop_proxy, wait_for_js_result, shutdown, AppEvent};
     pub use crate::value::JsValue;
     pub use crate::wasm_bindgen;
 }

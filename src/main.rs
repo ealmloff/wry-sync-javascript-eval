@@ -1,8 +1,7 @@
 //! Example application using wry-testing library
 
-use wry_testing::{
-    WINDOW, batch, run, set_on_log, wait_for_js_event
-};
+use wasm_bindgen::runtime::wait_for_js_event;
+use wry_testing::{WINDOW, batch, run, set_on_log};
 
 fn main() -> wry::Result<()> {
     run(app)
@@ -74,5 +73,7 @@ fn app() {
     });
 
     // Keep running to handle events
-    wait_for_js_event::<()>();
+    loop {
+        wait_for_js_event::<()>();
+    }
 }
