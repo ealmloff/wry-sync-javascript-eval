@@ -277,47 +277,53 @@ impl JsValue {
 
     /// Check if this value is a falsy value in JavaScript.
     pub fn is_falsy(&self) -> bool {
-        panic!("JsValue::is_falsy is not supported in wry-bindgen");
+        crate::js_helpers::js_is_falsy(self)
     }
 
     /// Check if this value is a truthy value in JavaScript.
     pub fn is_truthy(&self) -> bool {
-        panic!("JsValue::is_truthy is not supported in wry-bindgen");
+        crate::js_helpers::js_is_truthy(self)
     }
 
     /// Check if this value is an object.
     pub fn is_object(&self) -> bool {
-        panic!("JsValue::is_object is not supported in wry-bindgen");
+        crate::js_helpers::js_is_object(self)
     }
 
     /// Check if this value is a function.
     pub fn is_function(&self) -> bool {
-        panic!("JsValue::is_function is not supported in wry-bindgen");
+        crate::js_helpers::js_is_function(self)
     }
 
     /// Check if this value is a string.
     pub fn is_string(&self) -> bool {
-        panic!("JsValue::is_string is not supported in wry-bindgen");
+        crate::js_helpers::js_is_string(self)
     }
 
     /// Check if this value is a symbol.
     pub fn is_symbol(&self) -> bool {
-        panic!("JsValue::is_symbol is not supported in wry-bindgen");
+        crate::js_helpers::js_is_symbol(self)
     }
 
     /// Check if this value is a bigint.
     pub fn is_bigint(&self) -> bool {
-        panic!("JsValue::is_bigint is not supported in wry-bindgen");
+        crate::js_helpers::js_is_bigint(self)
     }
 
     /// Check if this value is undefined.
     pub fn is_undefined(&self) -> bool {
-        self.idx == JSIDX_UNDEFINED
+        if self.idx == JSIDX_UNDEFINED {
+            return true;
+        }
+        crate::js_helpers::js_is_undefined(self)
     }
 
     /// Check if this value is null.
     pub fn is_null(&self) -> bool {
-        self.idx == JSIDX_NULL
+        if self.idx == JSIDX_NULL {
+            return true;
+        }
+        crate::js_helpers::js_is_null(self)
     }
 
     /// Get the typeof this value as a string.
@@ -335,7 +341,17 @@ impl JsValue {
         match self.idx {
             JSIDX_TRUE => Some(true),
             JSIDX_FALSE => Some(false),
-            _ => None,
+            idx if idx < JSIDX_RESERVED => None,
+            _ => {
+                // For heap values, check via JS
+                if crate::js_helpers::js_is_true(self) {
+                    Some(true)
+                } else if crate::js_helpers::js_is_false(self) {
+                    Some(false)
+                } else {
+                    None
+                }
+            }
         }
     }
 

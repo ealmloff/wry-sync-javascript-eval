@@ -21,6 +21,7 @@ mod cast;
 pub mod encode;
 pub mod function;
 pub mod ipc;
+mod js_helpers;
 mod lazy;
 #[cfg(feature = "runtime")]
 pub mod runtime;

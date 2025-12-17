@@ -10,6 +10,7 @@ use quote::{format_ident, quote};
 /// Generate code for the entire program
 pub fn generate(program: &Program) -> syn::Result<TokenStream> {
     let mut tokens = TokenStream::new();
+    let krate = &program.crate_path;
 
     // Collect type names being defined in this block
     let type_names: std::collections::HashSet<String> = program
@@ -20,30 +21,30 @@ pub fn generate(program: &Program) -> syn::Result<TokenStream> {
 
     // Generate type definitions
     for ty in &program.types {
-        tokens.extend(generate_type(ty)?);
+        tokens.extend(generate_type(ty, krate)?);
     }
 
     // Generate function definitions
     for func in &program.functions {
-        tokens.extend(generate_function(func, &type_names)?);
+        tokens.extend(generate_function(func, &type_names, krate)?);
     }
 
     // Generate static definitions
     for st in &program.statics {
-        tokens.extend(generate_static(st)?);
+        tokens.extend(generate_static(st, krate)?);
     }
 
     Ok(tokens)
 }
 
 /// Generate code for an imported type
-fn generate_type(ty: &ImportType) -> syn::Result<TokenStream> {
+fn generate_type(ty: &ImportType, krate: &TokenStream) -> syn::Result<TokenStream> {
     let vis = &ty.vis;
     let rust_name = &ty.rust_name;
     let _js_name = &ty.js_name;
     let derives = &ty.derives;
 
-    // Generate the struct definition using wasm_bindgen::JsValue
+    // Generate the struct definition using JsValue from the configured crate
     // repr(transparent) ensures the same memory layout
     // Apply user-provided attributes (like #[derive(Debug, PartialEq, Eq)])
     // Use named struct with `obj` field to match wasm-bindgen's generated types
@@ -51,14 +52,14 @@ fn generate_type(ty: &ImportType) -> syn::Result<TokenStream> {
         #(#derives)*
         #[repr(transparent)]
         #vis struct #rust_name {
-            pub obj: wasm_bindgen::JsValue,
+            pub obj: #krate::JsValue,
         }
     };
 
     // Generate AsRef<JsValue> implementation
     let as_ref_impl = quote! {
-        impl AsRef<wasm_bindgen::JsValue> for #rust_name {
-            fn as_ref(&self) -> &wasm_bindgen::JsValue {
+        impl AsRef<#krate::JsValue> for #rust_name {
+            fn as_ref(&self) -> &#krate::JsValue {
                 &self.obj
             }
         }
@@ -70,28 +71,28 @@ fn generate_type(ty: &ImportType) -> syn::Result<TokenStream> {
             /// This is safe because all imported JS types are #[repr(transparent)]
             /// wrappers around JsValue with identical memory layouts.
             #[inline]
-            pub fn unchecked_from_js_ref(val: &wasm_bindgen::JsValue) -> &Self {
-                unsafe { &*(val as *const wasm_bindgen::JsValue as *const Self) }
+            pub fn unchecked_from_js_ref(val: &#krate::JsValue) -> &Self {
+                unsafe { &*(val as *const #krate::JsValue as *const Self) }
             }
         }
     };
 
     // Generate From<Type> for JsValue and From<JsValue> for Type
     let into_jsvalue = quote! {
-        impl From<#rust_name> for wasm_bindgen::JsValue {
+        impl From<#rust_name> for #krate::JsValue {
             fn from(val: #rust_name) -> Self {
                 val.obj
             }
         }
 
-        impl From<&#rust_name> for wasm_bindgen::JsValue {
+        impl From<&#rust_name> for #krate::JsValue {
             fn from(val: &#rust_name) -> Self {
                 val.obj.clone()
             }
         }
 
-        impl From<wasm_bindgen::JsValue> for #rust_name {
-            fn from(val: wasm_bindgen::JsValue) -> Self {
+        impl From<#krate::JsValue> for #rust_name {
+            fn from(val: #krate::JsValue) -> Self {
                 Self { obj: val }
             }
         }
@@ -100,7 +101,7 @@ fn generate_type(ty: &ImportType) -> syn::Result<TokenStream> {
     // Generate Deref to JsValue - this is always safe, just field access
     let deref_impls = quote! {
         impl std::ops::Deref for #rust_name {
-            type Target = wasm_bindgen::JsValue;
+            type Target = #krate::JsValue;
             fn deref(&self) -> &Self::Target {
                 &self.obj
             }
@@ -135,17 +136,17 @@ fn generate_type(ty: &ImportType) -> syn::Result<TokenStream> {
     // Generate TypeConstructor implementation
     // All JS types use HeapRefType since they're references to JS heap objects
     let type_constructor_impl = quote! {
-        impl wasm_bindgen::TypeConstructor for #rust_name {
+        impl #krate::TypeConstructor for #rust_name {
             fn create_type_instance() -> String {
-                <wasm_bindgen::JsValue as wasm_bindgen::TypeConstructor>::create_type_instance()
+                <#krate::JsValue as #krate::TypeConstructor>::create_type_instance()
             }
         }
     };
 
     // Generate BinaryEncode implementation
     let binary_encode_impl = quote! {
-        impl wasm_bindgen::BinaryEncode for #rust_name {
-            fn encode(self, encoder: &mut wasm_bindgen::EncodedData) {
+        impl #krate::BinaryEncode for #rust_name {
+            fn encode(self, encoder: &mut #krate::EncodedData) {
                 self.obj.encode(encoder);
             }
         }
@@ -153,42 +154,42 @@ fn generate_type(ty: &ImportType) -> syn::Result<TokenStream> {
 
     // Generate BinaryDecode implementation
     let binary_decode_impl = quote! {
-        impl wasm_bindgen::BinaryDecode for #rust_name {
-            fn decode(decoder: &mut wasm_bindgen::DecodedData) -> Result<Self, wasm_bindgen::DecodeError> {
-                wasm_bindgen::JsValue::decode(decoder).map(|v| Self { obj: v })
+        impl #krate::BinaryDecode for #rust_name {
+            fn decode(decoder: &mut #krate::DecodedData) -> Result<Self, #krate::DecodeError> {
+                #krate::JsValue::decode(decoder).map(|v| Self { obj: v })
             }
         }
     };
 
     // Generate BatchableResult implementation
     let batchable_impl = quote! {
-        impl wasm_bindgen::BatchableResult for #rust_name {
+        impl #krate::BatchableResult for #rust_name {
             fn needs_flush() -> bool {
                 false
             }
 
-            fn batched_placeholder(batch: &mut wasm_bindgen::batch::BatchState) -> Self {
-                Self { obj: <wasm_bindgen::JsValue as wasm_bindgen::BatchableResult>::batched_placeholder(batch) }
+            fn batched_placeholder(batch: &mut #krate::batch::BatchState) -> Self {
+                Self { obj: <#krate::JsValue as #krate::BatchableResult>::batched_placeholder(batch) }
             }
         }
     };
 
     // Generate JsCast implementation
     let jscast_impl = quote! {
-        impl wasm_bindgen::JsCast for #rust_name {
-            fn instanceof(val: &wasm_bindgen::JsValue) -> bool {
+        impl #krate::JsCast for #rust_name {
+            fn instanceof(val: &#krate::JsValue) -> bool {
                 // For now, always return false - proper instanceof requires JS runtime check
                 let _ = val;
                 false
             }
 
-            fn unchecked_from_js(val: wasm_bindgen::JsValue) -> Self {
+            fn unchecked_from_js(val: #krate::JsValue) -> Self {
                 Self { obj: val }
             }
 
-            fn unchecked_from_js_ref(val: &wasm_bindgen::JsValue) -> &Self {
+            fn unchecked_from_js_ref(val: &#krate::JsValue) -> &Self {
                 // SAFETY: #[repr(transparent)] guarantees same layout
-                unsafe { &*(val as *const wasm_bindgen::JsValue as *const Self) }
+                unsafe { &*(val as *const #krate::JsValue as *const Self) }
             }
         }
     };
@@ -211,6 +212,7 @@ fn generate_type(ty: &ImportType) -> syn::Result<TokenStream> {
 fn generate_function(
     func: &ImportFunction,
     type_names: &std::collections::HashSet<String>,
+    krate: &TokenStream,
 ) -> syn::Result<TokenStream> {
     let vis = &func.vis;
     let rust_name = &func.rust_name;
@@ -238,7 +240,7 @@ fn generate_function(
     let js_code = generate_js_code(func);
 
     // Generate argument lists
-    let args = generate_args(func)?;
+    let args = generate_args(func, krate)?;
     let fn_params = &args.fn_params;
     let fn_types = &args.fn_types;
     let call_values = &args.call_values;
@@ -252,22 +254,22 @@ fn generate_function(
 
     // Generate return type constructor
     let ret_type_constructor = match &func.ret {
-        Some(_ty) => quote! { <#ret_type as wasm_bindgen::TypeConstructor<_>>::create_type_instance() },
+        Some(_ty) => quote! { <#ret_type as #krate::TypeConstructor<_>>::create_type_instance() },
         None => quote! { "new window.NullType()".to_string() },
     };
 
     // Generate the inline_js option
     let js_name_str = &func.js_name;
     let inline_js_option = if let Some(inline_js) = func.inline_js.as_ref() {
-        quote! { Some(wasm_bindgen::InlineJsModule::new(#inline_js, #js_name_str)) }
+        quote! { Some(#krate::InlineJsModule::new(#inline_js, #js_name_str)) }
     } else {
         quote! { None }
     };
 
     // Generate the function body
     let func_body = quote! {
-        wasm_bindgen::inventory::submit! {
-            wasm_bindgen::JsFunctionSpec::new(
+        #krate::inventory::submit! {
+            #krate::JsFunctionSpec::new(
                 #registry_name,
                 #js_code,
                 || (#type_constructors, #ret_type_constructor),
@@ -276,8 +278,8 @@ fn generate_function(
         }
 
         // Look up the function at runtime
-        let func: wasm_bindgen::JSFunction<fn(#fn_types) -> #ret_type> =
-            wasm_bindgen::FUNCTION_REGISTRY
+        let func: #krate::JSFunction<fn(#fn_types) -> #ret_type> =
+            #krate::FUNCTION_REGISTRY
                 .get_function(#registry_name)
                 .expect(concat!("Function not found: ", #registry_name));
 
@@ -424,7 +426,7 @@ struct GeneratedArgs {
 }
 
 /// Generate argument lists
-fn generate_args(func: &ImportFunction) -> syn::Result<GeneratedArgs> {
+fn generate_args(func: &ImportFunction, krate: &TokenStream) -> syn::Result<GeneratedArgs> {
     let mut fn_params = Vec::new();
     let mut fn_types = Vec::new();
     let mut call_values = Vec::new();
@@ -435,9 +437,9 @@ fn generate_args(func: &ImportFunction) -> syn::Result<GeneratedArgs> {
         ImportFunctionKind::Method { .. }
         | ImportFunctionKind::Getter { .. }
         | ImportFunctionKind::Setter { .. } => {
-            fn_types.push(quote! { &wasm_bindgen::JsValue });
+            fn_types.push(quote! { &#krate::JsValue });
             call_values.push(quote! { &self.obj });
-            type_constructors.push(quote! { <&wasm_bindgen::JsValue as wasm_bindgen::TypeConstructor<_>>::create_type_instance() });
+            type_constructors.push(quote! { <&#krate::JsValue as #krate::TypeConstructor<_>>::create_type_instance() });
         }
         _ => {}
     }
@@ -449,7 +451,7 @@ fn generate_args(func: &ImportFunction) -> syn::Result<GeneratedArgs> {
         fn_params.push(quote! { #name: #ty });
         fn_types.push(quote! { #ty });
         call_values.push(quote! { #name });
-        type_constructors.push(quote! { <#ty as wasm_bindgen::TypeConstructor<_>>::create_type_instance() });
+        type_constructors.push(quote! { <#ty as #krate::TypeConstructor<_>>::create_type_instance() });
     }
 
     let fn_params_tokens = if fn_params.is_empty() {
@@ -496,7 +498,7 @@ fn extract_type_name(ty: &syn::Type) -> syn::Result<&syn::Ident> {
 }
 
 /// Generate code for an imported static
-fn generate_static(st: &ImportStatic) -> syn::Result<TokenStream> {
+fn generate_static(st: &ImportStatic, krate: &TokenStream) -> syn::Result<TokenStream> {
     let vis = &st.vis;
     let rust_name = &st.rust_name;
     let ty = &st.ty;
@@ -508,13 +510,13 @@ fn generate_static(st: &ImportStatic) -> syn::Result<TokenStream> {
     let js_code = generate_static_js_code(st);
 
     // Generate the type constructor for the return type
-    let ret_type_constructor = quote! { <#ty as wasm_bindgen::TypeConstructor<_>>::create_type_instance() };
+    let ret_type_constructor = quote! { <#ty as #krate::TypeConstructor<_>>::create_type_instance() };
 
     if st.thread_local_v2 {
         // Generate a lazily-initialized thread-local static
         Ok(quote! {
-            wasm_bindgen::inventory::submit! {
-                wasm_bindgen::JsFunctionSpec::new(
+            #krate::inventory::submit! {
+                #krate::JsFunctionSpec::new(
                     #registry_name,
                     #js_code,
                     || (vec![] as Vec<String>, #ret_type_constructor),
@@ -522,26 +524,26 @@ fn generate_static(st: &ImportStatic) -> syn::Result<TokenStream> {
                 )
             }
 
-            #vis static #rust_name: wasm_bindgen::JsThreadLocal<#ty> = {
+            #vis static #rust_name: #krate::JsThreadLocal<#ty> = {
                 fn init() -> #ty {
                     // Look up the accessor function at runtime
-                    let func: wasm_bindgen::JSFunction<fn() -> #ty> =
-                        wasm_bindgen::FUNCTION_REGISTRY
+                    let func: #krate::JSFunction<fn() -> #ty> =
+                        #krate::FUNCTION_REGISTRY
                             .get_function(#registry_name)
                             .expect(concat!("Static accessor not found: ", #registry_name));
 
                     // Call the accessor to get the value
                     func.call()
                 }
-                wasm_bindgen::__wry_bindgen_thread_local!(#ty = init())
+                #krate::__wry_bindgen_thread_local!(#ty = init())
             };
         })
     } else {
         // For non-thread-local statics, generate a regular function accessor
         // This matches the behavior of wasm-bindgen without thread_local_v2 attribute
         Ok(quote! {
-            wasm_bindgen::inventory::submit! {
-                wasm_bindgen::JsFunctionSpec::new(
+            #krate::inventory::submit! {
+                #krate::JsFunctionSpec::new(
                     #registry_name,
                     #js_code,
                     || (vec![] as Vec<String>, #ret_type_constructor),
@@ -551,8 +553,8 @@ fn generate_static(st: &ImportStatic) -> syn::Result<TokenStream> {
 
             #vis fn #rust_name() -> #ty {
                 // Look up the accessor function at runtime
-                let func: wasm_bindgen::JSFunction<fn() -> #ty> =
-                    wasm_bindgen::FUNCTION_REGISTRY
+                let func: #krate::JSFunction<fn() -> #ty> =
+                    #krate::FUNCTION_REGISTRY
                         .get_function(#registry_name)
                         .expect(concat!("Static accessor not found: ", #registry_name));
 

@@ -43,6 +43,8 @@ pub struct Program {
     pub functions: Vec<ImportFunction>,
     /// Imported statics (global values)
     pub statics: Vec<ImportStatic>,
+    /// Custom crate path for imports (default: wasm_bindgen)
+    pub crate_path: proc_macro2::TokenStream,
 }
 
 /// An imported JavaScript type
@@ -155,6 +157,9 @@ pub struct ImportStatic {
 
 /// Parse a syn::Item into our AST
 pub fn parse_item(program: &mut Program, item: syn::Item, attrs: BindgenAttrs) -> syn::Result<()> {
+    // Set the crate path from the attributes
+    program.crate_path = attrs.crate_path_tokens();
+
     match item {
         syn::Item::ForeignMod(foreign) => {
             parse_foreign_mod(program, foreign, attrs)?;

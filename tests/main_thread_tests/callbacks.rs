@@ -1,5 +1,4 @@
 use wasm_bindgen::{runtime::wait_for_js_event, wasm_bindgen};
-use wry_testing::wait_for_js_result;
 
 pub(crate) fn test_call_callback() {
     #[wasm_bindgen(inline_js = "export function calls_callback(cb, value) { return cb(value); }")]

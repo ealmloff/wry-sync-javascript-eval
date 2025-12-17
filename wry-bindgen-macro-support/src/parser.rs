@@ -7,6 +7,7 @@ use syn::ext::IdentExt;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{Expr, Ident, LitStr, Path, Token};
+use quote::ToTokens;
 
 /// Parse an identifier or keyword as a string.
 /// This allows using Rust keywords like `return`, `self`, `type`, etc. as JS names.
@@ -65,6 +66,8 @@ pub struct BindgenAttrs {
     pub final_: Option<Span>,
     /// The `readonly` attribute - mark property as read-only
     pub readonly: Option<Span>,
+    /// The `crate` attribute - custom crate path for imports (default: wasm_bindgen)
+    pub crate_path: Option<(Span, Path)>,
 }
 
 impl BindgenAttrs {
@@ -107,6 +110,17 @@ impl BindgenAttrs {
     pub fn is_thread_local_v2(&self) -> bool {
         self.thread_local_v2.is_some()
     }
+
+    /// Get the crate path as a TokenStream, defaulting to `wasm_bindgen`
+    pub fn crate_path_tokens(&self) -> TokenStream {
+        match &self.crate_path {
+            Some((_, path)) => path.to_token_stream(),
+            None => {
+                let ident = Ident::new("wasm_bindgen", Span::call_site());
+                ident.to_token_stream()
+            }
+        }
+    }
 }
 
 /// A single attribute within wasm_bindgen(...)
@@ -132,11 +146,13 @@ enum BindgenAttr {
     IndexingDeleter(Span),
     Final(Span),
     Readonly(Span),
+    Crate(Span, Path),
 }
 
 impl Parse for BindgenAttr {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let ident: Ident = input.parse()?;
+        // Use parse_any to handle keywords like `crate`
+        let ident = input.call(Ident::parse_any)?;
         let span = ident.span();
         let name = ident.to_string();
 
@@ -254,6 +270,18 @@ impl Parse for BindgenAttr {
             "indexing_deleter" => Ok(BindgenAttr::IndexingDeleter(span)),
             "final" => Ok(BindgenAttr::Final(span)),
             "readonly" => Ok(BindgenAttr::Readonly(span)),
+
+            "crate" => {
+                input.parse::<Token![=]>()?;
+                // Handle `crate` keyword specially since it's not a valid Path
+                let path = if input.peek(Token![crate]) {
+                    let crate_token: Token![crate] = input.parse()?;
+                    syn::Path::from(syn::PathSegment::from(syn::Ident::new("crate", crate_token.span)))
+                } else {
+                    input.parse()?
+                };
+                Ok(BindgenAttr::Crate(span, path))
+            }
 
             _ => Err(syn::Error::new(
                 span,
@@ -428,6 +456,12 @@ pub fn parse_attrs(attr: TokenStream) -> syn::Result<BindgenAttrs> {
                     return Err(syn::Error::new(span, "duplicate `readonly` attribute"));
                 }
                 result.readonly = Some(span);
+            }
+            BindgenAttr::Crate(span, path) => {
+                if result.crate_path.is_some() {
+                    return Err(syn::Error::new(span, "duplicate `crate` attribute"));
+                }
+                result.crate_path = Some((span, path));
             }
         }
     }
