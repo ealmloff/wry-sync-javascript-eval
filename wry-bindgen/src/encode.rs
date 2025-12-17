@@ -566,6 +566,7 @@ macro_rules! impl_fnmut_stub {
         {
             fn encode(mut self, encoder: &mut EncodedData) {
                 #[allow(unused)]
+                #[allow(non_snake_case)]
                 let value = register_value(RustValue::new(
                     move |decoder: &mut DecodedData, encoder: &mut EncodedData| {
                         // Decode arguments
@@ -586,8 +587,8 @@ macro_rules! impl_fnmut_stub {
             $($arg: TypeConstructor, )*
         {
             fn create_type_instance() -> String {
-                let args: Vec<String> = vec![$($arg::create_type_instance(),)*];
-                format!("new window.CallbackType([{}], {})",
+                let args: std::vec::Vec<String> = std::vec![$($arg::create_type_instance(),)*];
+                std::format!("new window.CallbackType([{}], {})",
                     args.join(", "),
                     R::create_type_instance(),
                 )

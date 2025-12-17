@@ -485,7 +485,7 @@ fn generate_args(func: &ImportFunction, krate: &TokenStream) -> syn::Result<Gene
     };
 
     let type_constructors_tokens = quote! {
-        vec![#(#type_constructors),*]
+        std::vec![#(#type_constructors),*]
     };
 
     Ok(GeneratedArgs {
@@ -531,7 +531,7 @@ fn generate_static(st: &ImportStatic, krate: &TokenStream) -> syn::Result<TokenS
                 #krate::JsFunctionSpec::new(
                     #registry_name,
                     #js_code,
-                    || (vec![] as Vec<String>, #ret_type_constructor),
+                    || (std::vec![] as std::vec::Vec<String>, #ret_type_constructor),
                     None
                 )
             }
@@ -558,7 +558,7 @@ fn generate_static(st: &ImportStatic, krate: &TokenStream) -> syn::Result<TokenS
                 #krate::JsFunctionSpec::new(
                     #registry_name,
                     #js_code,
-                    || (vec![] as Vec<String>, #ret_type_constructor),
+                    || (std::vec![] as std::vec::Vec<String>, #ret_type_constructor),
                     None
                 )
             }
