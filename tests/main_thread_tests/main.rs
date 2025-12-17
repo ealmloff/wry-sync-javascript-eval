@@ -3,6 +3,7 @@ use wry_testing::set_on_log;
 mod add_number_js;
 mod callbacks;
 mod jsvalue;
+mod string_enum;
 
 fn main() {
     wry_testing::run(|| {
@@ -23,6 +24,14 @@ fn main() {
         jsvalue::test_jsvalue_equality();
         jsvalue::test_jsvalue_from_js();
         jsvalue::test_jsvalue_pass_to_js();
+
+        // String enum tests
+        string_enum::test_string_enum_from_str();
+        string_enum::test_string_enum_to_str();
+        string_enum::test_string_enum_repr();
+        string_enum::test_string_enum_derives();
+        string_enum::test_string_enum_to_jsvalue();
+        string_enum::test_string_enum_from_jsvalue();
     })
     .unwrap();
 }

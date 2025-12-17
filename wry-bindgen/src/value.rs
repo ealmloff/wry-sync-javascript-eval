@@ -101,11 +101,8 @@ impl JsValue {
     }
 
     /// Creates a JS string from a Rust string.
-    ///
-    /// Note: This is a stub implementation for API compatibility.
-    /// In wry-bindgen, use JS bindings to create strings instead.
-    pub fn from_str(_s: &str) -> JsValue {
-        panic!("JsValue::from_str is not supported in wry-bindgen - use JS bindings instead");
+    pub fn from_str(s: &str) -> JsValue {
+        crate::js_helpers::js_string_to_jsvalue(s)
     }
 
     /// Creates a JS number from an f64.
@@ -362,7 +359,7 @@ impl JsValue {
 
     /// Get the value as a string.
     pub fn as_string(&self) -> Option<String> {
-        panic!("JsValue::as_string is not supported in wry-bindgen");
+        crate::js_helpers::js_as_string(self)
     }
 }
 

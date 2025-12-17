@@ -43,8 +43,25 @@ pub struct Program {
     pub functions: Vec<ImportFunction>,
     /// Imported statics (global values)
     pub statics: Vec<ImportStatic>,
+    /// String enums
+    pub string_enums: Vec<StringEnum>,
     /// Custom crate path for imports (default: wasm_bindgen)
     pub crate_path: proc_macro2::TokenStream,
+}
+
+/// A string enum - an enum where each variant has a string discriminant
+#[derive(Debug)]
+pub struct StringEnum {
+    /// Visibility of the enum
+    pub vis: Visibility,
+    /// Rust enum name
+    pub name: Ident,
+    /// Variant identifiers
+    pub variants: Vec<Ident>,
+    /// String values for each variant (in same order as variants)
+    pub variant_values: Vec<String>,
+    /// User-provided attributes (like #[derive(Debug, Clone, Copy, PartialEq, Eq)])
+    pub rust_attrs: Vec<syn::Attribute>,
 }
 
 /// An imported JavaScript type
@@ -164,6 +181,10 @@ pub fn parse_item(program: &mut Program, item: syn::Item, attrs: BindgenAttrs) -
         syn::Item::ForeignMod(foreign) => {
             parse_foreign_mod(program, foreign, attrs)?;
         }
+        syn::Item::Enum(e) => {
+            let string_enum = parse_string_enum(e)?;
+            program.string_enums.push(string_enum);
+        }
         syn::Item::Struct(s) => {
             // Structs with wasm_bindgen become exported types
             // For now, we only support imported types via extern "C"
@@ -175,7 +196,7 @@ pub fn parse_item(program: &mut Program, item: syn::Item, attrs: BindgenAttrs) -
         _ => {
             return Err(syn::Error::new_spanned(
                 item,
-                "wasm_bindgen attribute must be on extern \"C\" block",
+                "wasm_bindgen attribute must be on extern \"C\" block or enum",
             ));
         }
     }
@@ -471,5 +492,68 @@ fn parse_foreign_static(
         ty: *s.ty,
         js_namespace,
         thread_local_v2,
+    })
+}
+
+/// Parse a string enum - an enum where variants have string discriminants like:
+/// ```ignore
+/// enum Color {
+///     Red = "red",
+///     Green = "green",
+/// }
+/// ```
+fn parse_string_enum(e: syn::ItemEnum) -> syn::Result<StringEnum> {
+    let mut variants = Vec::new();
+    let mut variant_values = Vec::new();
+
+    for variant in &e.variants {
+        // Check that the variant has no fields (unit variant)
+        if !matches!(variant.fields, syn::Fields::Unit) {
+            return Err(syn::Error::new_spanned(
+                &variant.fields,
+                "wasm_bindgen string enums only support unit variants",
+            ));
+        }
+
+        // Extract the string discriminant
+        let discriminant = variant.discriminant.as_ref().ok_or_else(|| {
+            syn::Error::new_spanned(
+                variant,
+                "wasm_bindgen string enum variants must have string discriminants (e.g., Variant = \"value\")",
+            )
+        })?;
+
+        // The discriminant must be a string literal
+        let string_value = match &discriminant.1 {
+            syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Str(s),
+                ..
+            }) => s.value(),
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    &discriminant.1,
+                    "wasm_bindgen string enum discriminants must be string literals",
+                ));
+            }
+        };
+
+        variants.push(variant.ident.clone());
+        variant_values.push(string_value);
+    }
+
+    // Extract non-wasm_bindgen attributes to preserve (like #[derive(...)])
+    let rust_attrs: Vec<syn::Attribute> = e
+        .attrs
+        .iter()
+        .filter(|attr| !attr.path().is_ident("wasm_bindgen"))
+        .cloned()
+        .collect();
+
+    Ok(StringEnum {
+        vis: e.vis,
+        name: e.ident,
+        variants,
+        variant_values,
+        rust_attrs,
     })
 }

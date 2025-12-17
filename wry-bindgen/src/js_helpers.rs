@@ -16,6 +16,8 @@ use crate::wasm_bindgen;
     export function __wry_is_string(x) { return typeof x === 'string'; }
     export function __wry_is_symbol(x) { return typeof x === 'symbol'; }
     export function __wry_is_bigint(x) { return typeof x === 'bigint'; }
+    export function __wry_as_string(x) { return typeof x === 'string' ? x : null; }
+    export function __wry_str_to_jsvalue(s) { return s; }
 "#)]
 extern "C" {
     #[wasm_bindgen(js_name = "__wry_is_undefined")]
@@ -53,4 +55,12 @@ extern "C" {
 
     #[wasm_bindgen(js_name = "__wry_is_bigint")]
     pub(crate) fn js_is_bigint(x: &JsValue) -> bool;
+
+    /// Get the string value of a JsValue if it is a string, otherwise None.
+    #[wasm_bindgen(js_name = "__wry_as_string")]
+    pub(crate) fn js_as_string(x: &JsValue) -> Option<String>;
+
+    /// Create a JsValue from a string.
+    #[wasm_bindgen(js_name = "__wry_str_to_jsvalue")]
+    pub(crate) fn js_string_to_jsvalue(s: &str) -> JsValue;
 }

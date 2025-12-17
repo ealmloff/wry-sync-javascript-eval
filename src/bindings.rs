@@ -112,3 +112,4 @@ export function set_on_log(callback) {
 extern "C" {
     pub fn set_on_log(callback: Box<dyn FnMut(String)>);
 }
+

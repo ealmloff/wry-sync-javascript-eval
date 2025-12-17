@@ -3,7 +3,7 @@
 //! This module generates Rust code that uses the wry-bindgen runtime
 //! and inventory-based function registration.
 
-use crate::ast::{ImportFunction, ImportFunctionKind, ImportStatic, ImportType, Program};
+use crate::ast::{ImportFunction, ImportFunctionKind, ImportStatic, ImportType, Program, StringEnum};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
@@ -32,6 +32,11 @@ pub fn generate(program: &Program) -> syn::Result<TokenStream> {
     // Generate static definitions
     for st in &program.statics {
         tokens.extend(generate_static(st, krate)?);
+    }
+
+    // Generate string enum definitions
+    for string_enum in &program.string_enums {
+        tokens.extend(generate_string_enum(string_enum, krate)?);
     }
 
     Ok(tokens)
@@ -588,4 +593,132 @@ fn generate_static_js_code(st: &ImportStatic) -> String {
     } else {
         format!("() => {}", js_name)
     }
+}
+
+/// Generate code for a string enum
+fn generate_string_enum(string_enum: &StringEnum, krate: &TokenStream) -> syn::Result<TokenStream> {
+    let vis = &string_enum.vis;
+    let enum_name = &string_enum.name;
+    let variants = &string_enum.variants;
+    let variant_values = &string_enum.variant_values;
+    let rust_attrs = &string_enum.rust_attrs;
+
+    let variant_count = variants.len();
+    let variant_indices: Vec<u32> = (0..variant_count as u32).collect();
+
+    let invalid_to_str_msg = format!(
+        "Converting an invalid string enum ({}) back to a string is currently not supported",
+        enum_name
+    );
+
+    // Generate variant paths for match arms (EnumName::VariantName)
+    let variant_paths: Vec<TokenStream> = variants
+        .iter()
+        .map(|v| quote!(#enum_name::#v))
+        .collect();
+
+    // Generate the enum definition with repr(u32)
+    let enum_def = quote! {
+        #(#rust_attrs)*
+        #[non_exhaustive]
+        #[repr(u32)]
+        #vis enum #enum_name {
+            #(#variants = #variant_indices,)*
+            #[automatically_derived]
+            #[doc(hidden)]
+            __Invalid
+        }
+    };
+
+    // Generate helper methods (from_str, to_str, from_js_value)
+    let impl_methods = quote! {
+        #[automatically_derived]
+        impl #enum_name {
+            /// Convert a string to this enum variant.
+            pub fn from_str(s: &str) -> Option<#enum_name> {
+                match s {
+                    #(#variant_values => Some(#variant_paths),)*
+                    _ => None,
+                }
+            }
+
+            /// Convert this enum variant to its string representation.
+            pub fn to_str(&self) -> &'static str {
+                match self {
+                    #(#variant_paths => #variant_values,)*
+                    #enum_name::__Invalid => panic!(#invalid_to_str_msg),
+                }
+            }
+
+            /// Convert a JsValue (if it's a string) to this enum variant.
+            #vis fn from_js_value(obj: &#krate::JsValue) -> Option<#enum_name> {
+                obj.as_string().and_then(|s| Self::from_str(&s))
+            }
+        }
+    };
+
+    // Generate TypeConstructor implementation
+    // String enums use the string type since they're encoded as their string values
+    let type_constructor_impl = quote! {
+        impl #krate::TypeConstructor for #enum_name {
+            fn create_type_instance() -> String {
+                "window.strType".to_string()
+            }
+        }
+    };
+
+    // Generate BinaryEncode implementation - encode as the string value
+    let binary_encode_impl = quote! {
+        impl #krate::BinaryEncode for #enum_name {
+            fn encode(self, encoder: &mut #krate::EncodedData) {
+                encoder.push_str(self.to_str());
+            }
+        }
+    };
+
+    // Generate BinaryDecode implementation - decode string to variant
+    let binary_decode_impl = quote! {
+        impl #krate::BinaryDecode for #enum_name {
+            fn decode(decoder: &mut #krate::DecodedData) -> Result<Self, #krate::DecodeError> {
+                let s = decoder.take_str()?;
+                match s {
+                    #(#variant_values => Ok(#variant_paths),)*
+                    _ => Ok(#enum_name::__Invalid),
+                }
+            }
+        }
+    };
+
+    // Generate BatchableResult implementation
+    let batchable_impl = quote! {
+        impl #krate::BatchableResult for #enum_name {
+            fn needs_flush() -> bool {
+                true
+            }
+
+            fn batched_placeholder(_batch: &mut #krate::batch::BatchState) -> Self {
+                unreachable!("needs_flush types should never call batched_placeholder")
+            }
+        }
+    };
+
+    // Generate From<EnumName> for JsValue
+    let into_jsvalue_impl = quote! {
+        #[automatically_derived]
+        impl From<#enum_name> for #krate::JsValue {
+            fn from(val: #enum_name) -> Self {
+                #krate::JsValue::from_str(val.to_str())
+            }
+        }
+    };
+
+    Ok(quote! {
+        #enum_def
+        #impl_methods
+        #type_constructor_impl
+        #binary_encode_impl
+        #binary_decode_impl
+        #batchable_impl
+        #into_jsvalue_impl
+    })
 }
