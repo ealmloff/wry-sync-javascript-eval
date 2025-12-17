@@ -10,12 +10,10 @@ use std::cell::RefCell;
 use std::marker::PhantomData;
 
 #[cfg(feature = "runtime")]
-use slotmap::{DefaultKey, Key, SlotMap};
+use slotmap::{DefaultKey, SlotMap};
 
 use crate::batch::run_js_sync;
 use crate::encode::{BatchableResult, BinaryEncode};
-#[cfg(feature = "runtime")]
-use crate::encode::{RustCallbackMarker, TypeConstructor};
 #[cfg(feature = "runtime")]
 use crate::ipc::{DecodedData, EncodedData};
 
@@ -447,36 +445,8 @@ thread_local! {
 
 /// Register a callback with the thread-local encoder using a short borrow
 #[cfg(feature = "runtime")]
-pub(crate) fn register_callback(callback: RustValue) -> DefaultKey {
+pub(crate) fn register_value(callback: RustValue) -> DefaultKey {
     THREAD_LOCAL_FUNCTION_ENCODER
         .with(|fn_encoder| fn_encoder.borrow_mut().register_value(callback))
 }
 
-// Implement encoding for Rust callback functions
-
-#[cfg(feature = "runtime")]
-impl<R: BinaryEncode<P>, P, F> BinaryEncode<RustCallbackMarker<(P,)>> for F
-where
-    F: FnMut() -> R + 'static,
-{
-    fn encode(mut self, encoder: &mut EncodedData) {
-        let value = register_callback(RustValue::new(
-            move |_: &mut DecodedData, encoder: &mut EncodedData| {
-                let result = (self)();
-                result.encode(encoder);
-            },
-        ));
-
-        encoder.push_u64(value.data().as_ffi());
-    }
-}
-
-#[cfg(feature = "runtime")]
-impl<R: TypeConstructor<P>, P, F> TypeConstructor<RustCallbackMarker<(P,)>> for F
-where
-    F: FnMut() -> R + 'static,
-{
-    fn create_type_instance() -> String {
-        format!("new window.CallbackType({})", R::create_type_instance())
-    }
-}

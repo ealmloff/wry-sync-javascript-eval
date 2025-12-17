@@ -79,9 +79,9 @@ function evaluate_from_rust_binary(dataBase64: string): unknown {
  * Handle binary response from Rust.
  * May contain nested Evaluate calls (for callbacks).
  */
-function handleBinaryResponse(response: ArrayBuffer | null): unknown {
+function handleBinaryResponse(response: ArrayBuffer | null): DataDecoder | null {
   if (!response || response.byteLength === 0) {
-    return undefined;
+    return null;
   }
 
   const decoder = new DataDecoder(response);
@@ -89,8 +89,8 @@ function handleBinaryResponse(response: ArrayBuffer | null): unknown {
   const msgType: MessageType = rawMsgType;
 
   if (msgType === MessageType.Respond) {
-    // Respond - just return (caller will decode the value)
-    return undefined;
+    // Respond - just return the decoder for further processing
+    return decoder;
   } else if (msgType === MessageType.Evaluate) {
     // Evaluate - Rust is calling JS functions (possibly multiple)
 
@@ -132,7 +132,7 @@ function handleBinaryResponse(response: ArrayBuffer | null): unknown {
     return handleBinaryResponse(nextResponse);
   }
 
-  return undefined;
+  return null;
 }
 
 export { evaluate_from_rust_binary, handleBinaryResponse, sync_request_binary, MessageType, DROP_NATIVE_REF_FN_ID };

@@ -7,6 +7,8 @@ use crate::batch::BatchState;
 use crate::ipc::{DecodeError, DecodedData, EncodedData};
 use crate::value::JsValue;
 use std::marker::PhantomData;
+use crate::function::{RustValue, register_value};
+use slotmap::Key;
 
 /// Trait for creating a JavaScript type instance.
 /// Used to map Rust types to their JavaScript type constructors.
@@ -526,6 +528,41 @@ macro_rules! impl_fnmut_stub {
         impl<R, $($arg,)*> TypeConstructor for &mut dyn FnMut($($arg),*) -> R {
             fn create_type_instance() -> String {
                 "new window.CallbackType()".to_string()
+            }
+        }
+
+        impl<R: BinaryEncode<P>, P, F, $($arg,)*> BinaryEncode<RustCallbackMarker<(P, fn($($arg,)*) -> R)>> for F
+        where
+            F: FnMut($($arg),*) -> R + 'static,
+            $($arg: BinaryDecode, )*
+        {
+            fn encode(mut self, encoder: &mut EncodedData) {
+                #[allow(unused)]
+                let value = register_value(RustValue::new(
+                    move |decoder: &mut DecodedData, encoder: &mut EncodedData| {
+                        // Decode arguments
+                        $(let $arg = <$arg as BinaryDecode>::decode(decoder).unwrap();)*
+                        let result = (self)($($arg),*);
+                        result.encode(encoder);
+                    },
+                ));
+
+                encoder.push_u64(value.data().as_ffi());
+            }
+        }
+
+        #[cfg(feature = "runtime")]
+        impl<R: TypeConstructor<P>, P, F, $($arg,)*> TypeConstructor<RustCallbackMarker<(P, fn($($arg,)*) -> R)>> for F
+        where
+            F: FnMut($($arg),*) -> R + 'static,
+            $($arg: TypeConstructor, )*
+        {
+            fn create_type_instance() -> String {
+                let args: Vec<String> = vec![$($arg::create_type_instance(),)*];
+                format!("new window.CallbackType([{}], {})",
+                    args.join(", "),
+                    R::create_type_instance(),
+                )
             }
         }
     };

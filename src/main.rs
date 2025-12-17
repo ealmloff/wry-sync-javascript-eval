@@ -11,6 +11,7 @@ mod webview;
 
 // Re-export bindings for convenience
 pub use bindings::{Element, alert, console_log};
+use bindings::set_on_log;
 
 fn main() -> wry::Result<()> {
     #[cfg(any(
@@ -49,6 +50,10 @@ fn main() -> wry::Result<()> {
 }
 
 fn app() {
+    set_on_log(Box::new(|msg: String| {
+        println!("Log from JS: {}", msg);
+    }));
+
     batch(|| {
         // Get document body using the lazily-initialized WINDOW static
         let document = WINDOW.with(|window| window.document());

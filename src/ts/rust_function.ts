@@ -1,5 +1,6 @@
 import { DataEncoder } from "./encoding";
 import { handleBinaryResponse, MessageType, sync_request_binary, DROP_NATIVE_REF_FN_ID } from "./ipc";
+import { TypeClass } from "./types";
 
 /**
  * FinalizationRegistry to notify Rust when RustFunction wrappers are GC'd.
@@ -22,22 +23,33 @@ const nativeRefRegistry = new FinalizationRegistry<number>((fnId: number) => {
  */
 class RustFunction {
   private fnId: number;
+  private paramTypes: TypeClass[];
+  private returnType: TypeClass;
 
-  constructor(fnId: number) {
+  constructor(fnId: number, paramTypes: TypeClass[], returnType: TypeClass) {
     this.fnId = fnId;
+    this.paramTypes = paramTypes;
+    this.returnType = returnType;
     // Register this instance so Rust is notified when we're GC'd
     nativeRefRegistry.register(this, fnId);
   }
 
-  call(): unknown {
+  call(...args: any[]): any {
     // Build Evaluate message: [0, fn_id]
     const encoder = new DataEncoder();
     encoder.pushU8(MessageType.Evaluate);
     encoder.pushU32(0); // Call argument function
     encoder.pushU64(this.fnId);
+    // Encode arguments
+    for (let i = 0; i < this.paramTypes.length; i++) {
+      this.paramTypes[i].encode(encoder, args[i]);
+    }
 
+    // Send to Rust and get response
     const response = sync_request_binary("wry://handler", encoder.finalize());
-    return handleBinaryResponse(response);
+    const result = handleBinaryResponse(response)!;
+    // Decode return value
+    return this.returnType.decode(result);
   }
 }
 

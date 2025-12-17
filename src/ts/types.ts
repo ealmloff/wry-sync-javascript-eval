@@ -56,10 +56,10 @@ class StringType implements TypeClass {
  * Type class for Rust callbacks with encoding/decoding methods
  */
 class CallbackType implements TypeClass {
-  private paramTypes: any[];
-  private returnType: any;
+  private paramTypes: TypeClass[];
+  private returnType: TypeClass;
 
-  constructor(paramTypes: any[], returnType: any) {
+  constructor(paramTypes: TypeClass[], returnType: TypeClass) {
     this.paramTypes = paramTypes;
     this.returnType = returnType;
   }
@@ -70,8 +70,8 @@ class CallbackType implements TypeClass {
 
   decode(decoder: DataDecoder): (...args: any[]) => any {
     const fnId = decoder.takeU64();
-    const f = new RustFunction(fnId);
-    return (...args: any[]) => f.call();
+    const f = new RustFunction(fnId, this.paramTypes, this.returnType);
+    return (...args: any[]) => f.call(...args);
   }
 }
 

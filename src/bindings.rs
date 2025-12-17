@@ -71,3 +71,44 @@ extern "C" {
     #[wasm_bindgen(method, js_class = "Document", js_name = createElement)]
     pub fn create_element(this: &Document, tag: String) -> Element;
 }
+
+#[wasm_bindgen(inline_js = r#"
+const originalLog = console.log;
+const originalWarn = console.warn;
+const originalError = console.error;
+
+let onLogCallback = null;
+
+function formatArgs(args) {
+    return Array.from(args).map(arg => {
+        try {
+            return typeof arg === 'object' ? JSON.stringify(arg) : String(arg);
+        } catch (e) {
+            return String(arg);
+        }
+    }).join(' ');
+}
+
+console.log = function(...args) {
+    originalLog.apply(console, args);
+    onLogCallback && onLogCallback(formatArgs(args));
+};
+
+console.warn = function(...args) {
+    originalWarn.apply(console, args);
+    onLogCallback && onLogCallback('WARN: ' + formatArgs(args));
+};
+
+console.error = function(...args) {
+    originalError.apply(console, args);
+    onLogCallback && onLogCallback('ERROR: ' + formatArgs(args));
+};
+
+export function set_on_log(callback) {
+    originalLog.call(console, "Setting onLogCallback");
+    onLogCallback = callback;
+}
+"#)]
+extern "C" {
+    pub fn set_on_log(callback: Box<dyn FnMut(String)>);
+}
