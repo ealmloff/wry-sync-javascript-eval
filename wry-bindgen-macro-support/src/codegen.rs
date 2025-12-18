@@ -478,7 +478,8 @@ fn generate_js_code(
 
     let (params, body) = match &func.kind {
         ImportFunctionKind::Normal => {
-            let args: Vec<_> = func.arguments.iter().map(|a| a.name.to_string()).collect();
+            // Use a{index} naming to avoid conflicts with JS reserved words
+            let args: Vec<_> = (0..func.arguments.len()).map(|i| format!("a{}", i)).collect();
             let args_str = args.join(", ");
             (
                 format!("({})", args_str),
@@ -486,7 +487,8 @@ fn generate_js_code(
             )
         }
         ImportFunctionKind::Method { .. } => {
-            let args: Vec<_> = func.arguments.iter().map(|a| a.name.to_string()).collect();
+            // Use a{index} naming to avoid conflicts with JS reserved words
+            let args: Vec<_> = (0..func.arguments.len()).map(|i| format!("a{}", i)).collect();
             let args_str = args.join(", ");
             if args.is_empty() {
                 ("(obj)".to_string(), format!("obj.{}()", js_name))
@@ -505,7 +507,8 @@ fn generate_js_code(
             format!("{{{{ obj.{} = value; }}}}", property),
         ),
         ImportFunctionKind::Constructor { class } => {
-            let args: Vec<_> = func.arguments.iter().map(|a| a.name.to_string()).collect();
+            // Use a{index} naming to avoid conflicts with JS reserved words
+            let args: Vec<_> = (0..func.arguments.len()).map(|i| format!("a{}", i)).collect();
             let args_str = args.join(", ");
 
             // Check if this type has vendor prefixes
@@ -525,7 +528,8 @@ fn generate_js_code(
             (format!("({})", args_str), body)
         }
         ImportFunctionKind::StaticMethod { class } => {
-            let args: Vec<_> = func.arguments.iter().map(|a| a.name.to_string()).collect();
+            // Use a{index} naming to avoid conflicts with JS reserved words
+            let args: Vec<_> = (0..func.arguments.len()).map(|i| format!("a{}", i)).collect();
             let args_str = args.join(", ");
             (
                 format!("({})", args_str),

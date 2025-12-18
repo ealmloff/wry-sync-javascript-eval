@@ -123,8 +123,10 @@ impl ApplicationHandler<AppEvent> for State {
             .build_as_child(&window)
             .unwrap();
 
+            let script = self.function_registry.script();
+            println!("Injecting function registry script:\n{}", script);
         webview
-            .evaluate_script(self.function_registry.script())
+            .evaluate_script(script)
             .unwrap();
 
         self.window = Some(window);

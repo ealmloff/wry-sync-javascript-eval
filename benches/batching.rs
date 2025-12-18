@@ -1,5 +1,5 @@
 use wasm_bindgen::wasm_bindgen;
-use wry_testing;
+use wry_testing::{self, JsValue};
 
 #[wasm_bindgen(inline_js = "export function add(a, b) { return a + b; }")]
 extern "C" {
@@ -21,7 +21,7 @@ pub fn bench_batch_add_100() {
     }")]
 extern "C" {
     #[wasm_bindgen(js_name = create_element)]
-    fn create_element(tag: &str) -> wry_testing::Element;
+    fn create_element(tag: &str) -> JsValue;
 }
 
 pub fn bench_batch_create_element_1() {
@@ -33,6 +33,6 @@ pub fn bench_batch_create_element_100() {
         let tag = format!("div");
         (0..100)
             .map(|_| create_element(&tag))
-            .collect::<Vec<wry_testing::Element>>()
+            .collect::<Vec<_>>()
     });
 }
