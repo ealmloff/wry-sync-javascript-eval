@@ -3,6 +3,7 @@
 //! This module defines the intermediate representation for parsed wasm_bindgen items.
 
 use crate::parser::BindgenAttrs;
+use std::hash::{Hash, Hasher};
 use syn::{FnArg, Ident, Pat, Path, ReturnType, Type, Visibility};
 
 /// Extract a simple type name from a Type
@@ -37,6 +38,8 @@ fn extract_simple_type_name(ty: &Type) -> Option<String> {
 /// Top-level program containing all parsed items
 #[derive(Debug, Default)]
 pub struct Program {
+    /// Attributes
+    pub attrs: BindgenAttrs,
     /// Imported types
     pub types: Vec<ImportType>,
     /// Imported functions
@@ -45,8 +48,6 @@ pub struct Program {
     pub statics: Vec<ImportStatic>,
     /// String enums
     pub string_enums: Vec<StringEnum>,
-    /// Custom crate path for imports (default: wasm_bindgen)
-    pub crate_path: proc_macro2::TokenStream,
 }
 
 /// A string enum - an enum where each variant has a string discriminant
@@ -94,8 +95,6 @@ pub struct ImportFunction {
     pub js_class: Option<String>,
     /// JavaScript namespace
     pub js_namespace: Option<Vec<String>>,
-    /// Inline JavaScript code (from block-level inline_js attribute, accepts any expression)
-    pub inline_js: Option<syn::Expr>,
     /// Function arguments (excluding self for methods)
     pub arguments: Vec<FunctionArg>,
     /// Return type
@@ -173,13 +172,10 @@ pub struct ImportStatic {
 }
 
 /// Parse a syn::Item into our AST
-pub fn parse_item(program: &mut Program, item: syn::Item, attrs: BindgenAttrs) -> syn::Result<()> {
-    // Set the crate path from the attributes
-    program.crate_path = attrs.crate_path_tokens();
-
+pub fn parse_item(program: &mut Program, item: syn::Item) -> syn::Result<()> {
     match item {
         syn::Item::ForeignMod(foreign) => {
-            parse_foreign_mod(program, foreign, attrs)?;
+            parse_foreign_mod(program, foreign)?;
         }
         syn::Item::Enum(e) => {
             let string_enum = parse_string_enum(e)?;
@@ -207,17 +203,13 @@ pub fn parse_item(program: &mut Program, item: syn::Item, attrs: BindgenAttrs) -
 fn parse_foreign_mod(
     program: &mut Program,
     foreign: syn::ItemForeignMod,
-    block_attrs: BindgenAttrs,
 ) -> syn::Result<()> {
-    // Extract block-level inline_js if present
-    let block_inline_js = block_attrs.inline_js.map(|(_, js)| js);
-
     for item in foreign.items {
         match item {
             syn::ForeignItem::Fn(f) => {
                 // Parse per-function attributes from #[wasm_bindgen(...)] on the function
                 let fn_attrs = extract_wasm_bindgen_attrs(&f.attrs)?;
-                let func = parse_foreign_fn(f, fn_attrs, block_inline_js.clone())?;
+                let func = parse_foreign_fn(f, fn_attrs)?;
                 program.functions.push(func);
             }
             syn::ForeignItem::Type(t) => {
@@ -313,7 +305,6 @@ fn extract_wasm_bindgen_attrs(attrs: &[syn::Attribute]) -> syn::Result<BindgenAt
 fn parse_foreign_fn(
     f: syn::ForeignItemFn,
     attrs: BindgenAttrs,
-    block_inline_js: Option<syn::Expr>,
 ) -> syn::Result<ImportFunction> {
     let rust_name = f.sig.ident.clone();
     let js_name = attrs
@@ -323,7 +314,6 @@ fn parse_foreign_fn(
 
     let js_class = attrs.js_class().map(|s| s.to_string());
     let js_namespace = attrs.js_namespace.as_ref().map(|(_, v)| v.clone());
-    let inline_js = block_inline_js;
 
     // Parse arguments
     let mut arguments = Vec::new();
@@ -424,7 +414,6 @@ fn parse_foreign_fn(
         js_name,
         js_class,
         js_namespace,
-        inline_js,
         arguments,
         ret,
         kind,

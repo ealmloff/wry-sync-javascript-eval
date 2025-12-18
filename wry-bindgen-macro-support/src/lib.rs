@@ -24,7 +24,8 @@ pub fn expand(attr: TokenStream, input: TokenStream) -> Result<TokenStream, syn:
 
     // Convert to our AST and generate code
     let mut program = ast::Program::default();
-    ast::parse_item(&mut program, item, attrs)?;
+    program.attrs = attrs;
+    ast::parse_item(&mut program, item)?;
 
     // Generate the output tokens
     codegen::generate(&program)

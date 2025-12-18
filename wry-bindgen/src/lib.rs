@@ -104,42 +104,58 @@ pub use inventory;
 
 pub struct JsFunctionSpec {
     pub name: &'static str,
-    pub js_code: &'static str,
+    /// Function that generates the JS code
+    pub js_code: fn() -> String,
     pub type_info: fn() -> (Vec<String>, String),
-    /// Optional inline JS module content (ES module with exports)
-    pub inline_js: Option<InlineJsModule>,
 }
 
 /// Inline JS module info
-
+#[derive(Clone, Copy)]
 pub struct InlineJsModule {
     /// The JS module content
     pub content: &'static str,
-    /// The exported function name (js_name)
-    pub export_name: &'static str,
 }
+
+impl InlineJsModule {
+    pub const fn new(content: &'static str) -> Self {
+        Self { content }
+    }
+
+    /// Calculate the hash of the module content for use as a filename
+    /// This uses a simple FNV-1a hash that can also be computed at compile time
+    pub fn hash(&self) -> String {
+        format!("{:x}", self.const_hash())
+    }
+
+    /// Const-compatible hash function (FNV-1a)
+    pub const fn const_hash(&self) -> u64 {
+        const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+        const FNV_PRIME: u64 = 0x100000001b3;
+
+        let mut hash = FNV_OFFSET_BASIS;
+        let mut i = 0;
+        let bytes = self.content.as_bytes();
+        while i < bytes.len() {
+            hash ^= bytes[i] as u64;
+            hash = hash.wrapping_mul(FNV_PRIME);
+            i += 1;
+        }
+        hash
+    }
+}
+
+inventory::collect!(InlineJsModule);
 
 impl JsFunctionSpec {
     pub const fn new(
         name: &'static str,
-        js_code: &'static str,
+        js_code: fn() -> String,
         type_info: fn() -> (Vec<String>, String),
-        inline_js: Option<InlineJsModule>,
     ) -> Self {
         Self {
             name,
             js_code,
             type_info,
-            inline_js,
-        }
-    }
-}
-
-impl InlineJsModule {
-    pub const fn new(content: &'static str, export_name: &'static str) -> Self {
-        Self {
-            content,
-            export_name,
         }
     }
 }
@@ -169,18 +185,20 @@ impl FunctionRegistry {
         let mut function_ids = Vec::new();
         let mut modules = std::collections::HashMap::new();
 
-        // First pass: collect all specs and module info
+        // Collect all inline JS modules and deduplicate by content hash
+        for inline_js in inventory::iter::<InlineJsModule>() {
+            let hash = inline_js.hash();
+            let module_path = format!("snippets/{}.js", hash);
+            // Only insert if we haven't seen this content before
+            modules.entry(module_path).or_insert(inline_js.content);
+        }
+
+        // Collect all function specs
         let specs: Vec<_> = inventory::iter::<JsFunctionSpec>().collect();
 
         for spec in &specs {
             let id = JsFunctionId { name: spec.name };
             function_ids.push(id);
-
-            // Store module content for serving via custom protocol
-            if let Some(ref inline_js) = spec.inline_js {
-                let module_path = format!("snippets/{}.js", spec.name);
-                modules.insert(module_path, inline_js.content);
-            }
         }
 
         // Build the script - load modules from wry:// handler before setting up function registry
@@ -189,14 +207,19 @@ impl FunctionRegistry {
         // Wrap everything in an async IIFE to use await
         script.push_str("(async () => {\n");
 
-        // Load all inline_js modules from the wry handler
-        for spec in &specs {
-            if spec.inline_js.is_some() {
-                // Dynamically import the module from wry://snippets/{name}.js
+        // Track which modules we've already imported (by hash)
+        let mut imported_modules = std::collections::HashSet::new();
+
+        // Load all inline_js modules from the wry handler (deduplicated by content hash)
+        for inline_js in inventory::iter::<InlineJsModule>() {
+            let hash = inline_js.hash();
+            // Only import each unique module once
+            if imported_modules.insert(hash.clone()) {
+                // Dynamically import the module from wry://snippets/{hash}.js
                 write!(
                     &mut script,
-                    "  const {} = await import('wry://snippets/{}.js');\n",
-                    spec.name, spec.name
+                    "  const module_{} = await import('wry://snippets/{}.js');\n",
+                    hash, hash
                 )
                 .unwrap();
             }
@@ -209,12 +232,13 @@ impl FunctionRegistry {
                 script.push_str(",\n");
             }
             let (args, return_type) = (spec.type_info)();
+            let js_code = (spec.js_code)();
             write!(
                 &mut script,
                 "window.createWrapperFunction([{}], {}, {})",
                 args.join(", "),
                 return_type,
-                spec.js_code
+                js_code
             )
             .unwrap();
         }
