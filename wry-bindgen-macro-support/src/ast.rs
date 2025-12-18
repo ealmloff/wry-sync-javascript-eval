@@ -108,6 +108,8 @@ pub struct ImportFunction {
     pub structural: bool,
     /// Whether this is variadic
     pub variadic: bool,
+    /// User-provided attributes (like #[cfg(...)] and #[doc = "..."])
+    pub rust_attrs: Vec<syn::Attribute>,
 }
 
 /// Argument to an imported function
@@ -410,6 +412,14 @@ fn parse_foreign_fn(
         ImportFunctionKind::Normal
     };
 
+    // Extract non-wasm_bindgen attributes to preserve (like #[cfg(...)] and #[doc = "..."])
+    let rust_attrs: Vec<syn::Attribute> = f
+        .attrs
+        .iter()
+        .filter(|attr| !attr.path().is_ident("wasm_bindgen"))
+        .cloned()
+        .collect();
+
     Ok(ImportFunction {
         vis: f.vis,
         rust_name,
@@ -422,6 +432,7 @@ fn parse_foreign_fn(
         catch: attrs.catch.is_some(),
         structural: attrs.is_structural(),
         variadic: attrs.variadic.is_some(),
+        rust_attrs,
     })
 }
 

@@ -346,6 +346,9 @@ fn generate_function(
         func.call(#call_values)
     };
 
+    // Get the rust attributes to forward (like #[cfg(...)] and #[doc = "..."])
+    let rust_attrs = &func.rust_attrs;
+
     // Generate the full function based on kind
     match &func.kind {
         ImportFunctionKind::Normal => {
@@ -356,6 +359,7 @@ fn generate_function(
                     let class_ident = format_ident!("{}", &ns[0]);
                     return Ok(quote_spanned! {span=>
                         impl #class_ident {
+                            #(#rust_attrs)*
                             #vis fn #rust_name(#fn_params) -> #ret_type {
                                 #func_body
                             }
@@ -364,6 +368,7 @@ fn generate_function(
                 }
             }
             Ok(quote_spanned! {span=>
+                #(#rust_attrs)*
                 #vis fn #rust_name(#fn_params) -> #ret_type {
                     #func_body
                 }
@@ -384,6 +389,7 @@ fn generate_function(
 
             Ok(quote_spanned! {span=>
                 impl #receiver_type {
+                    #(#rust_attrs)*
                     #vis fn #rust_name(#method_args) -> #ret_type {
                         #func_body
                     }
@@ -395,6 +401,7 @@ fn generate_function(
             // Use the actual return type (may be Result<T, JsValue> for catch constructors)
             Ok(quote_spanned! {span=>
                 impl #class_ident {
+                    #(#rust_attrs)*
                     #vis fn #rust_name(#fn_params) -> #ret_type {
                         #func_body
                     }
@@ -405,6 +412,7 @@ fn generate_function(
             let class_ident = format_ident!("{}", class);
             Ok(quote_spanned! {span=>
                 impl #class_ident {
+                    #(#rust_attrs)*
                     #vis fn #rust_name(#fn_params) -> #ret_type {
                         #func_body
                     }
