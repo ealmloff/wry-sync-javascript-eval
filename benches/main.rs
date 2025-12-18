@@ -1,6 +1,5 @@
 use std::time::{Duration, Instant};
 use wasm_bindgen::wasm_bindgen;
-use wry_testing::{bindings::set_on_error, set_on_log};
 
 mod batching;
 mod roundtrip;

@@ -123,7 +123,6 @@ impl ApplicationHandler<AppEvent> for State {
         webview
             .evaluate_script(self.function_registry.script())
             .unwrap();
-        webview.open_devtools();
 
         self.window = Some(window);
         self.webview = Some(webview);
