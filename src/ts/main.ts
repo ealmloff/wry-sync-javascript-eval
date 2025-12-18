@@ -1,7 +1,7 @@
 import { JSHeap } from "./heap.ts";
 import "./ipc.ts";
 import { evaluate_from_rust_binary } from "./ipc.ts";
-import { createWrapperFunction, BoolType, HeapRefType, NullType, U8Type, U16Type, U32Type, U64Type, OptionType, CallbackType, F32Type, F64Type, ResultType } from "./types.ts";
+import { createWrapperFunction, BoolType, HeapRefType, NullType, U8Type, U16Type, U32Type, U64Type, OptionType, CallbackType, F32Type, F64Type, ResultType, StringEnumType, strType } from "./types.ts";
 import { FunctionSpec, setFunctionRegistry } from "./function_registry.ts";
 
 
@@ -21,6 +21,8 @@ window.U32Type = U32Type;
 window.U64Type = U64Type;
 window.F32Type = F32Type;
 window.F64Type = F64Type;
+window.StringEnumType = StringEnumType;
+window.strType = strType;
 
 declare global {
   interface Window {
@@ -40,5 +42,7 @@ declare global {
     U64Type: typeof U64Type;
     F32Type: typeof F32Type;
     F64Type: typeof F64Type;
+    StringEnumType: typeof StringEnumType;
+    strType: typeof strType;
   }
 }

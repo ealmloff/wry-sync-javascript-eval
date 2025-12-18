@@ -753,31 +753,32 @@ fn generate_string_enum(string_enum: &StringEnum, krate: &TokenStream) -> syn::R
     };
 
     // Generate TypeConstructor implementation
-    // String enums use the string type since they're encoded as their string values
+    // String enums use StringEnumType with a lookup array for efficient u32 encoding
     let type_constructor_impl = quote! {
         impl #krate::TypeConstructor for #enum_name {
             fn create_type_instance() -> String {
-                "window.strType".to_string()
+                format!("new window.StringEnumType([{}])",
+                    vec![#(#variant_values),*].join(", "))
             }
         }
     };
 
-    // Generate BinaryEncode implementation - encode as the string value
+    // Generate BinaryEncode implementation - encode as u32 discriminant
     let binary_encode_impl = quote! {
         impl #krate::BinaryEncode for #enum_name {
             fn encode(self, encoder: &mut #krate::EncodedData) {
-                encoder.push_str(self.to_str());
+                encoder.push_u32(self as u32);
             }
         }
     };
 
-    // Generate BinaryDecode implementation - decode string to variant
+    // Generate BinaryDecode implementation - decode u32 to variant
     let binary_decode_impl = quote! {
         impl #krate::BinaryDecode for #enum_name {
             fn decode(decoder: &mut #krate::DecodedData) -> Result<Self, #krate::DecodeError> {
-                let s = decoder.take_str()?;
-                match s {
-                    #(#variant_values => Ok(#variant_paths),)*
+                let discriminant = decoder.take_u32()?;
+                match discriminant {
+                    #(#variant_indices => Ok(#variant_paths),)*
                     _ => Ok(#enum_name::__Invalid),
                 }
             }

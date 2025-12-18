@@ -52,6 +52,29 @@ class StringType implements TypeClass {
 }
 
 /**
+ * Type class for string enum values with u32 encoding and lookup arrays
+ */
+class StringEnumType implements TypeClass {
+  private lookupArray: string[];
+
+  constructor(lookupArray: string[]) {
+    this.lookupArray = lookupArray;
+  }
+
+  encode(encoder: DataEncoder, value: string): void {
+    const index = this.lookupArray.indexOf(value);
+    // Invalid values encoded as lookupArray.length (maps to __Invalid variant)
+    const encoded = index >= 0 ? index : this.lookupArray.length;
+    encoder.pushU32(encoded);
+  }
+
+  decode(decoder: DataDecoder): string {
+    const index = decoder.takeU32();
+    return this.lookupArray[index];
+  }
+}
+
+/**
  * Type class for Rust callbacks with encoding/decoding methods
  */
 class CallbackType implements TypeClass {
@@ -241,6 +264,7 @@ export {
   NumericType,
   OptionType,
   StringType,
+  StringEnumType,
   ResultType,
   createWrapperFunction,
 };
