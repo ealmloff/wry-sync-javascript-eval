@@ -558,11 +558,17 @@ macro_rules! impl_fnmut_stub {
             }
         }
 
+        impl<R, $($arg,)*> crate::Closure<dyn FnMut($($arg),*) -> R> {
+            #[allow(non_snake_case)]
+            pub fn call(&mut self, $($arg: $arg),*) -> R {
+                (self.value)($($arg),*)
+            }
+        }
+
         #[cfg(feature = "runtime")]
-        impl<R: BinaryEncode<P>, P, F, $($arg,)*> BinaryEncode<RustCallbackMarker<(P, fn($($arg,)*) -> R)>> for F
+        impl<R: BinaryEncode<P> + 'static, P, $($arg,)*> BinaryEncode<RustCallbackMarker<(P, fn($($arg,)*) -> R)>> for crate::Closure<dyn FnMut($($arg),*) -> R>
         where
-            F: FnMut($($arg),*) -> R + 'static,
-            $($arg: BinaryDecode, )*
+            $($arg: BinaryDecode + 'static, )*
         {
             fn encode(mut self, encoder: &mut EncodedData) {
                 #[allow(unused)]
@@ -571,7 +577,7 @@ macro_rules! impl_fnmut_stub {
                     move |decoder: &mut DecodedData, encoder: &mut EncodedData| {
                         // Decode arguments
                         $(let $arg = <$arg as BinaryDecode>::decode(decoder).unwrap();)*
-                        let result = (self)($($arg),*);
+                        let result = self.call($($arg),*);
                         result.encode(encoder);
                     },
                 ));
@@ -581,9 +587,18 @@ macro_rules! impl_fnmut_stub {
         }
 
         #[cfg(feature = "runtime")]
-        impl<R: TypeConstructor<P>, P, F, $($arg,)*> TypeConstructor<RustCallbackMarker<(P, fn($($arg,)*) -> R)>> for F
+        impl<R: BinaryEncode<P> + 'static, P, $($arg,)*> BinaryEncode<RustCallbackMarker<(P, fn($($arg,)*) -> R)>> for &crate::Closure<dyn FnMut($($arg),*) -> R>
         where
-            F: FnMut($($arg),*) -> R + 'static,
+            $($arg: BinaryDecode + 'static, )*
+        {
+            fn encode(self, _: &mut EncodedData) {
+                todo!()
+            }
+        }
+        
+        #[cfg(feature = "runtime")]
+        impl<R: TypeConstructor<P>, P, $($arg,)*> TypeConstructor<RustCallbackMarker<(P, fn($($arg,)*) -> R)>> for crate::Closure<dyn FnMut($($arg),*) -> R>
+        where
             $($arg: TypeConstructor, )*
         {
             fn create_type_instance() -> String {

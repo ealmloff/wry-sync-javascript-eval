@@ -1197,6 +1197,14 @@ dependencies = [
 [[package]]
 name = "js-sys"
 version = "0.3.83"
+dependencies = [
+ "once_cell",
+ "wry-bindgen",
+]
+
+[[package]]
+name = "js-sys"
+version = "0.3.83"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "464a3709c7f55f1f721e5389aa6ea4e3bc6aba669353300af094b29ffbdde1d8"
 dependencies = [
@@ -2884,10 +2892,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "836d9622d604feee9e5de25ac10e3ea5f2d65b41eac0d9ce72eb5deae707ce7c"
 dependencies = [
  "cfg-if",
- "js-sys",
+ "js-sys 0.3.83 (registry+https://github.com/rust-lang/crates.io-index)",
  "once_cell",
  "wasm-bindgen",
- "web-sys",
+ "web-sys 0.3.83 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -3034,10 +3042,18 @@ dependencies = [
 [[package]]
 name = "web-sys"
 version = "0.3.83"
+dependencies = [
+ "js-sys 0.3.83",
+ "wry-bindgen",
+]
+
+[[package]]
+name = "web-sys"
+version = "0.3.83"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b32828d774c412041098d182a8b38b16ea816958e07cf40eec2bc080ae137ac"
 dependencies = [
- "js-sys",
+ "js-sys 0.3.83 (registry+https://github.com/rust-lang/crates.io-index)",
  "wasm-bindgen",
 ]
 
@@ -3047,7 +3063,7 @@ version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
- "js-sys",
+ "js-sys 0.3.83 (registry+https://github.com/rust-lang/crates.io-index)",
  "wasm-bindgen",
 ]
 
@@ -3464,7 +3480,7 @@ dependencies = [
  "core-graphics",
  "cursor-icon",
  "dpi",
- "js-sys",
+ "js-sys 0.3.83 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc",
  "memmap2",
  "ndk",
@@ -3489,7 +3505,7 @@ dependencies = [
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-plasma",
- "web-sys",
+ "web-sys 0.3.83 (registry+https://github.com/rust-lang/crates.io-index)",
  "web-time",
  "windows-sys 0.52.0",
  "x11-dl",
@@ -3613,6 +3629,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slotmap",
+ "web-sys 0.3.83",
  "winit",
  "wry",
  "wry-bindgen",

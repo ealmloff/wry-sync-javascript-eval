@@ -153,12 +153,19 @@ fn generate_type(ty: &ImportType, krate: &TokenStream) -> syn::Result<TokenStrea
         }
     };
 
-    // Generate Deref to JsValue - this is always safe, just field access
-    let deref_impls = quote_spanned! {span=>
-        impl std::ops::Deref for #rust_name {
-            type Target = #krate::JsValue;
-            fn deref(&self) -> &Self::Target {
-                &self.obj
+    // Generate Deref to the first parent or JsValue if no parents
+    let deref_impls = {
+        let deref_to = if let Some(first_parent) = ty.extends.first() {
+            first_parent.to_token_stream()
+        } else {
+            quote_spanned! {span=> #krate::JsValue }
+        };
+        quote_spanned! {span=>
+            impl std::ops::Deref for #rust_name {
+                type Target = #deref_to;
+                fn deref(&self) -> &Self::Target {
+                    self.as_ref()
+                }
             }
         }
     };

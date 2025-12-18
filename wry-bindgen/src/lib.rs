@@ -39,14 +39,16 @@ pub mod __rt {
 }
 
 /// Closure type for passing Rust closures to JavaScript.
-/// Note: This is a stub implementation for API compatibility.
-/// Actual closure passing is not yet fully supported in wry-bindgen.
 pub struct Closure<T: ?Sized> {
-    _marker: std::marker::PhantomData<T>,
-    _value: JsValue,
+    pub(crate) value: Box<T>,
 }
 
 impl<T: ?Sized> Closure<T> {
+    /// Creates a new Closure
+    pub fn new(value: Box<T>) -> Self {
+        Self { value }
+    }
+
     /// Forgets the closure, leaking it.
     pub fn forget(self) {
         std::mem::forget(self);
@@ -55,26 +57,7 @@ impl<T: ?Sized> Closure<T> {
 
 impl<T: ?Sized> AsRef<JsValue> for Closure<T> {
     fn as_ref(&self) -> &JsValue {
-        &self._value
-    }
-}
-
-// Implement encoding traits for Closure
-impl<T: ?Sized> encode::TypeConstructor for Closure<T> {
-    fn create_type_instance() -> String {
-        "new window.ClosureType()".to_string()
-    }
-}
-
-impl<T: ?Sized> encode::BinaryEncode for Closure<T> {
-    fn encode(self, encoder: &mut ipc::EncodedData) {
-        self._value.encode(encoder);
-    }
-}
-
-impl<T: ?Sized> encode::BinaryEncode for &Closure<T> {
-    fn encode(self, encoder: &mut ipc::EncodedData) {
-        (&self._value).encode(encoder);
+        todo!()
     }
 }
 

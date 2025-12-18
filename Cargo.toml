@@ -7,14 +7,6 @@ name = "wry-testing"
 version = "0.1.0"
 edition = "2024"
 
-[lib]
-name = "wry_testing"
-path = "src/lib.rs"
-
-[[bin]]
-name = "wry-testing"
-path = "src/main.rs"
-
 [dependencies]
 base64 = "0.22.1"
 bytemuck = "1.24.0"
@@ -29,6 +21,9 @@ wasm-bindgen-macro = { package = "wry-bindgen-macro", path = "wry-bindgen-macro"
 
 [build-dependencies]
 lazy-js-bundle = { git = "https://github.com/DioxusLabs/dioxus" }
+
+[dev-dependencies]
+web-sys = { path = "wasm-bindgen/crates/web-sys", features = ['Document', 'Element', 'HtmlElement', 'Node', 'Window'] }
 
 [[test]]
 name = "main_thread_tests"

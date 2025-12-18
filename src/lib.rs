@@ -15,7 +15,6 @@ use webview::State;
 
 // Re-export bindings for convenience
 pub use bindings::set_on_log;
-pub use bindings::{Document, Element, WINDOW, Window, alert, console_log};
 
 // Re-export prelude items that apps need
 pub use wasm_bindgen::JsValue;
