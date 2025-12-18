@@ -44,10 +44,11 @@ pub(crate) struct State {
     shared: Rc<RefCell<SharedWebviewState>>,
     state: WebviewLoadingState,
     proxy: EventLoopProxy<AppEvent>,
+    headless: bool,
 }
 
 impl State {
-    pub fn new(function_registry: &'static FunctionRegistry, proxy: EventLoopProxy<AppEvent>) -> Self {
+    pub fn new(function_registry: &'static FunctionRegistry, proxy: EventLoopProxy<AppEvent>, headless: bool) -> Self {
         Self {
             function_registry,
             window: None,
@@ -55,6 +56,7 @@ impl State {
             shared: Rc::new(RefCell::new(SharedWebviewState::default())),
             state: WebviewLoadingState::default(),
             proxy,
+            headless,
         }
     }
 }
@@ -63,6 +65,7 @@ impl ApplicationHandler<AppEvent> for State {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let mut attributes = Window::default_attributes();
         attributes.inner_size = Some(LogicalSize::new(800, 800).into());
+        attributes.visible = !self.headless;
         let window = event_loop.create_window(attributes).unwrap();
         let shared = self.shared.clone();
         let proxy = self.proxy.clone();

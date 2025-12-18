@@ -49,6 +49,42 @@ pub fn run<F>(app: F) -> wry::Result<()>
 where
     F: FnOnce() + Send + 'static,
 {
+    run_with_config(app, false)
+}
+
+/// Run a headless webview application with the given app function.
+///
+/// This is identical to `run()` except the window will be invisible.
+/// Useful for testing, automation, or background processing.
+///
+/// # Example
+///
+/// ```ignore
+/// use wry_testing::{run_headless, batch, WINDOW};
+///
+/// fn main() -> wry::Result<()> {
+///     run_headless(app)
+/// }
+///
+/// fn app() {
+///     batch(|| {
+///         let document = WINDOW.with(|w| w.document());
+///         // ... build your UI
+///     });
+///     wait_for_js_event::<()>();
+/// }
+/// ```
+pub fn run_headless<F>(app: F) -> wry::Result<()>
+where
+    F: FnOnce() + Send + 'static,
+{
+    run_with_config(app, true)
+}
+
+fn run_with_config<F>(app: F, headless: bool) -> wry::Result<()>
+where
+    F: FnOnce() + Send + 'static,
+{
     #[cfg(any(
         target_os = "linux",
         target_os = "dragonfly",
@@ -93,7 +129,7 @@ where
         shutdown(status);
     });
 
-    let mut state = State::new(registry, proxy);
+    let mut state = State::new(registry, proxy, headless);
     event_loop.run_app(&mut state).unwrap();
 
     Ok(())

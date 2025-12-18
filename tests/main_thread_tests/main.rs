@@ -26,7 +26,7 @@ fn test_with_js_context<F: FnOnce()>(f: F) {
 }
 
 fn main() {
-    wry_testing::run(|| {
+    wry_testing::run_headless(|| {
         set_on_error(Box::new(|err: String| {
             println!("[JS ERROR] {}", err);
         }));

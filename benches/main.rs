@@ -67,7 +67,7 @@ fn bench<F: Fn()>(name: &str, f: F) -> BenchResult {
 }
 
 fn main() {
-    wry_testing::run(|| {
+    wry_testing::run_headless(|| {
         println!("\n{:=<100}", "");
         println!("{:^100}", "wry-bindgen Benchmarks");
         println!("{:=<100}\n", "");
