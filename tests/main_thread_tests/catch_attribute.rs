@@ -1,5 +1,5 @@
-use wasm_bindgen::wasm_bindgen;
 use wasm_bindgen::JsValue;
+use wasm_bindgen::wasm_bindgen;
 
 pub(crate) fn test_catch_throws_error() {
     #[wasm_bindgen(inline_js = "export function throws_error() { throw new Error('test error'); }")]
@@ -14,8 +14,10 @@ pub(crate) fn test_catch_throws_error() {
     if let Err(e) = result {
         let error_string = format!("{:?}", e);
         println!("Caught error: {}", error_string);
-        assert!(error_string.contains("test error") || error_string.contains("Error"),
-                "Error should contain error message");
+        assert!(
+            error_string.contains("test error") || error_string.contains("Error"),
+            "Error should contain error message"
+        );
     }
 }
 

@@ -73,7 +73,6 @@ impl JsValue {
     /// This is called internally when decoding a value from JS.
     #[inline]
     pub(crate) fn from_id(id: u64) -> Self {
-        println!("creating Jsvalue from idx: {id}");
         Self { idx: id }
     }
 
@@ -118,7 +117,6 @@ impl Clone for JsValue {
     fn clone(&self) -> JsValue {
         // Reserved values don't need cloning - they're constants
         if self.idx < JSIDX_RESERVED {
-            println!("[DEBUG JsValue::clone] Cloning reserved JsValue with idx={}", self.idx);
             return JsValue { idx: self.idx };
         }
 
@@ -135,8 +133,6 @@ impl Drop for JsValue {
         if self.idx < JSIDX_RESERVED {
             return;
         }
-
-        println!("[DEBUG JsValue::drop] Dropping JsValue with idx={}", self.idx);
 
         // Drop the value on the JS heap
         crate::batch::queue_js_drop(self.idx);
@@ -352,12 +348,9 @@ impl JsValue {
 
     /// Check if this value is null.
     pub fn is_null(&self) -> bool {
-        eprintln!("[DEBUG is_null] self.idx={}, JSIDX_NULL={}, eq={}", self.idx, JSIDX_NULL, self.idx == JSIDX_NULL);
         if self.idx == JSIDX_NULL {
-            eprintln!("[DEBUG is_null] returning true early");
             return true;
         }
-        eprintln!("[DEBUG is_null] calling js_is_null");
         crate::js_helpers::js_is_null(self)
     }
 

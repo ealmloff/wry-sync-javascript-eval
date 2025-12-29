@@ -5,8 +5,8 @@ mod add_number_js;
 mod callbacks;
 mod catch_attribute;
 mod jsvalue;
-mod string_enum;
 mod roundtrip;
+mod string_enum;
 
 #[wasm_bindgen(inline_js = "export function heap_objects_alive(f) {
         return window.jsHeap.heapObjectsAlive();

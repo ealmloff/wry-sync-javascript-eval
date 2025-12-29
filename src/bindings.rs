@@ -48,4 +48,3 @@ extern "C" {
     pub fn set_on_log(callback: Closure<dyn FnMut(String)>);
     pub fn set_on_error(callback: Closure<dyn FnMut(String)>);
 }
-

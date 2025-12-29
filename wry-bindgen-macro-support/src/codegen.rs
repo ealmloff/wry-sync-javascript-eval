@@ -467,7 +467,9 @@ fn generate_js_code(
     let (params, body) = match &func.kind {
         ImportFunctionKind::Normal => {
             // Use a{index} naming to avoid conflicts with JS reserved words
-            let args: Vec<_> = (0..func.arguments.len()).map(|i| format!("a{}", i)).collect();
+            let args: Vec<_> = (0..func.arguments.len())
+                .map(|i| format!("a{}", i))
+                .collect();
             let args_str = args.join(", ");
             (
                 format!("({})", args_str),
@@ -476,7 +478,9 @@ fn generate_js_code(
         }
         ImportFunctionKind::Method { .. } => {
             // Use a{index} naming to avoid conflicts with JS reserved words
-            let args: Vec<_> = (0..func.arguments.len()).map(|i| format!("a{}", i)).collect();
+            let args: Vec<_> = (0..func.arguments.len())
+                .map(|i| format!("a{}", i))
+                .collect();
             let args_str = args.join(", ");
             if args.is_empty() {
                 ("(obj)".to_string(), format!("obj.{}()", js_name))
@@ -496,7 +500,9 @@ fn generate_js_code(
         ),
         ImportFunctionKind::Constructor { class } => {
             // Use a{index} naming to avoid conflicts with JS reserved words
-            let args: Vec<_> = (0..func.arguments.len()).map(|i| format!("a{}", i)).collect();
+            let args: Vec<_> = (0..func.arguments.len())
+                .map(|i| format!("a{}", i))
+                .collect();
             let args_str = args.join(", ");
 
             // Check if this type has vendor prefixes
@@ -517,7 +523,9 @@ fn generate_js_code(
         }
         ImportFunctionKind::StaticMethod { class } => {
             // Use a{index} naming to avoid conflicts with JS reserved words
-            let args: Vec<_> = (0..func.arguments.len()).map(|i| format!("a{}", i)).collect();
+            let args: Vec<_> = (0..func.arguments.len())
+                .map(|i| format!("a{}", i))
+                .collect();
             let args_str = args.join(", ");
             (
                 format!("({})", args_str),

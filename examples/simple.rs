@@ -33,10 +33,7 @@ fn app() {
     let undef = get_undefined();
     eprintln!("[TEST] get_undefined() returned idx={:?}", undef);
     let is_undefined = undef.is_undefined();
-    assert!(
-        is_undefined,
-        "get_undefined() should return undefined"
-    );
+    assert!(is_undefined, "get_undefined() should return undefined");
 
     let null = get_null();
     eprintln!("[TEST] get_null() returned idx={:?}", null);

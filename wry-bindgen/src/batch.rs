@@ -136,7 +136,11 @@ pub fn is_batching() -> bool {
 /// Queue a JS drop operation for a heap ID.
 /// This is called when a JsValue is dropped.
 pub(crate) fn queue_js_drop(id: u64) {
-    debug_assert!(id >= JSIDX_RESERVED, "Attempted to drop reserved JS heap ID {}", id);
+    debug_assert!(
+        id >= JSIDX_RESERVED,
+        "Attempted to drop reserved JS heap ID {}",
+        id
+    );
     let drop_fn: JSFunction<fn(u64) -> ()> = JSFunction::new(DROP_HEAP_REF_FN_ID);
     drop_fn.call(id);
     BATCH_STATE.with(|state| {

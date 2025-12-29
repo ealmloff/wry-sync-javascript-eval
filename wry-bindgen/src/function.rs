@@ -14,9 +14,9 @@ use slotmap::{DefaultKey, SlotMap};
 
 use crate::batch::run_js_sync;
 use crate::encode::{BatchableResult, BinaryEncode, EncodeTypeDef, TYPE_CACHED, TYPE_FULL};
-use crate::ipc::EncodedData;
 #[cfg(feature = "runtime")]
 use crate::ipc::DecodedData;
+use crate::ipc::EncodedData;
 
 /// Reserved function ID for dropping native Rust refs when JS objects are GC'd.
 /// JS sends this when a FinalizationRegistry callback fires for a RustFunction.
@@ -32,10 +32,7 @@ thread_local! {
 /// Encode type definitions for a function call.
 /// On first call for a type signature, sends TYPE_FULL + id + param_count + type defs.
 /// On subsequent calls, sends TYPE_CACHED + id.
-fn encode_function_types(
-    encoder: &mut EncodedData,
-    encode_types: impl FnOnce(&mut Vec<u8>),
-) {
+fn encode_function_types(encoder: &mut EncodedData, encode_types: impl FnOnce(&mut Vec<u8>)) {
     // Always encode type definitions to get the bytes
     let mut type_buf = Vec::new();
     encode_types(&mut type_buf);
@@ -116,7 +113,9 @@ impl<T1: EncodeTypeDef, R: BatchableResult + EncodeTypeDef> JSFunction<fn(T1) ->
     }
 }
 
-impl<T1: EncodeTypeDef, T2: EncodeTypeDef, R: BatchableResult + EncodeTypeDef> JSFunction<fn(T1, T2) -> R> {
+impl<T1: EncodeTypeDef, T2: EncodeTypeDef, R: BatchableResult + EncodeTypeDef>
+    JSFunction<fn(T1, T2) -> R>
+{
     pub fn call<P1, P2>(&self, arg1: T1, arg2: T2) -> R
     where
         T1: BinaryEncode<P1>,
@@ -135,7 +134,9 @@ impl<T1: EncodeTypeDef, T2: EncodeTypeDef, R: BatchableResult + EncodeTypeDef> J
     }
 }
 
-impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, R: BatchableResult + EncodeTypeDef> JSFunction<fn(T1, T2, T3) -> R> {
+impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, R: BatchableResult + EncodeTypeDef>
+    JSFunction<fn(T1, T2, T3) -> R>
+{
     pub fn call<P1, P2, P3>(&self, arg1: T1, arg2: T2, arg3: T3) -> R
     where
         T1: BinaryEncode<P1>,
@@ -157,7 +158,14 @@ impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, R: BatchableResult
     }
 }
 
-impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef, R: BatchableResult + EncodeTypeDef> JSFunction<fn(T1, T2, T3, T4) -> R> {
+impl<
+    T1: EncodeTypeDef,
+    T2: EncodeTypeDef,
+    T3: EncodeTypeDef,
+    T4: EncodeTypeDef,
+    R: BatchableResult + EncodeTypeDef,
+> JSFunction<fn(T1, T2, T3, T4) -> R>
+{
     pub fn call<P1, P2, P3, P4>(&self, arg1: T1, arg2: T2, arg3: T3, arg4: T4) -> R
     where
         T1: BinaryEncode<P1>,
@@ -182,7 +190,15 @@ impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef,
     }
 }
 
-impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef, T5: EncodeTypeDef, R: BatchableResult + EncodeTypeDef> JSFunction<fn(T1, T2, T3, T4, T5) -> R> {
+impl<
+    T1: EncodeTypeDef,
+    T2: EncodeTypeDef,
+    T3: EncodeTypeDef,
+    T4: EncodeTypeDef,
+    T5: EncodeTypeDef,
+    R: BatchableResult + EncodeTypeDef,
+> JSFunction<fn(T1, T2, T3, T4, T5) -> R>
+{
     pub fn call<P1, P2, P3, P4, P5>(&self, arg1: T1, arg2: T2, arg3: T3, arg4: T4, arg5: T5) -> R
     where
         T1: BinaryEncode<P1>,
@@ -210,7 +226,16 @@ impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef,
     }
 }
 
-impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef, T5: EncodeTypeDef, T6: EncodeTypeDef, R: BatchableResult + EncodeTypeDef> JSFunction<fn(T1, T2, T3, T4, T5, T6) -> R> {
+impl<
+    T1: EncodeTypeDef,
+    T2: EncodeTypeDef,
+    T3: EncodeTypeDef,
+    T4: EncodeTypeDef,
+    T5: EncodeTypeDef,
+    T6: EncodeTypeDef,
+    R: BatchableResult + EncodeTypeDef,
+> JSFunction<fn(T1, T2, T3, T4, T5, T6) -> R>
+{
     pub fn call<P1, P2, P3, P4, P5, P6>(
         &self,
         arg1: T1,
@@ -249,8 +274,16 @@ impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef,
     }
 }
 
-impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef, T5: EncodeTypeDef, T6: EncodeTypeDef, T7: EncodeTypeDef, R: BatchableResult + EncodeTypeDef>
-    JSFunction<fn(T1, T2, T3, T4, T5, T6, T7) -> R>
+impl<
+    T1: EncodeTypeDef,
+    T2: EncodeTypeDef,
+    T3: EncodeTypeDef,
+    T4: EncodeTypeDef,
+    T5: EncodeTypeDef,
+    T6: EncodeTypeDef,
+    T7: EncodeTypeDef,
+    R: BatchableResult + EncodeTypeDef,
+> JSFunction<fn(T1, T2, T3, T4, T5, T6, T7) -> R>
 {
     pub fn call<P1, P2, P3, P4, P5, P6, P7>(
         &self,
@@ -294,8 +327,17 @@ impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef,
     }
 }
 
-impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef, T5: EncodeTypeDef, T6: EncodeTypeDef, T7: EncodeTypeDef, T8: EncodeTypeDef, R: BatchableResult + EncodeTypeDef>
-    JSFunction<fn(T1, T2, T3, T4, T5, T6, T7, T8) -> R>
+impl<
+    T1: EncodeTypeDef,
+    T2: EncodeTypeDef,
+    T3: EncodeTypeDef,
+    T4: EncodeTypeDef,
+    T5: EncodeTypeDef,
+    T6: EncodeTypeDef,
+    T7: EncodeTypeDef,
+    T8: EncodeTypeDef,
+    R: BatchableResult + EncodeTypeDef,
+> JSFunction<fn(T1, T2, T3, T4, T5, T6, T7, T8) -> R>
 {
     pub fn call<P1, P2, P3, P4, P5, P6, P7, P8>(
         &self,
@@ -343,8 +385,18 @@ impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef,
     }
 }
 
-impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef, T5: EncodeTypeDef, T6: EncodeTypeDef, T7: EncodeTypeDef, T8: EncodeTypeDef, T9: EncodeTypeDef, R: BatchableResult + EncodeTypeDef>
-    JSFunction<fn(T1, T2, T3, T4, T5, T6, T7, T8, T9) -> R>
+impl<
+    T1: EncodeTypeDef,
+    T2: EncodeTypeDef,
+    T3: EncodeTypeDef,
+    T4: EncodeTypeDef,
+    T5: EncodeTypeDef,
+    T6: EncodeTypeDef,
+    T7: EncodeTypeDef,
+    T8: EncodeTypeDef,
+    T9: EncodeTypeDef,
+    R: BatchableResult + EncodeTypeDef,
+> JSFunction<fn(T1, T2, T3, T4, T5, T6, T7, T8, T9) -> R>
 {
     pub fn call<P1, P2, P3, P4, P5, P6, P7, P8, P9>(
         &self,
@@ -396,8 +448,19 @@ impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef,
     }
 }
 
-impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef, T5: EncodeTypeDef, T6: EncodeTypeDef, T7: EncodeTypeDef, T8: EncodeTypeDef, T9: EncodeTypeDef, T10: EncodeTypeDef, R: BatchableResult + EncodeTypeDef>
-    JSFunction<fn(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10) -> R>
+impl<
+    T1: EncodeTypeDef,
+    T2: EncodeTypeDef,
+    T3: EncodeTypeDef,
+    T4: EncodeTypeDef,
+    T5: EncodeTypeDef,
+    T6: EncodeTypeDef,
+    T7: EncodeTypeDef,
+    T8: EncodeTypeDef,
+    T9: EncodeTypeDef,
+    T10: EncodeTypeDef,
+    R: BatchableResult + EncodeTypeDef,
+> JSFunction<fn(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10) -> R>
 {
     pub fn call<P1, P2, P3, P4, P5, P6, P7, P8, P9, P10>(
         &self,
@@ -453,8 +516,20 @@ impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef,
     }
 }
 
-impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef, T5: EncodeTypeDef, T6: EncodeTypeDef, T7: EncodeTypeDef, T8: EncodeTypeDef, T9: EncodeTypeDef, T10: EncodeTypeDef, T11: EncodeTypeDef, R: BatchableResult + EncodeTypeDef>
-    JSFunction<fn(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11) -> R>
+impl<
+    T1: EncodeTypeDef,
+    T2: EncodeTypeDef,
+    T3: EncodeTypeDef,
+    T4: EncodeTypeDef,
+    T5: EncodeTypeDef,
+    T6: EncodeTypeDef,
+    T7: EncodeTypeDef,
+    T8: EncodeTypeDef,
+    T9: EncodeTypeDef,
+    T10: EncodeTypeDef,
+    T11: EncodeTypeDef,
+    R: BatchableResult + EncodeTypeDef,
+> JSFunction<fn(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11) -> R>
 {
     pub fn call<P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11>(
         &self,
@@ -514,8 +589,21 @@ impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef,
     }
 }
 
-impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef, T5: EncodeTypeDef, T6: EncodeTypeDef, T7: EncodeTypeDef, T8: EncodeTypeDef, T9: EncodeTypeDef, T10: EncodeTypeDef, T11: EncodeTypeDef, T12: EncodeTypeDef, R: BatchableResult + EncodeTypeDef>
-    JSFunction<fn(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12) -> R>
+impl<
+    T1: EncodeTypeDef,
+    T2: EncodeTypeDef,
+    T3: EncodeTypeDef,
+    T4: EncodeTypeDef,
+    T5: EncodeTypeDef,
+    T6: EncodeTypeDef,
+    T7: EncodeTypeDef,
+    T8: EncodeTypeDef,
+    T9: EncodeTypeDef,
+    T10: EncodeTypeDef,
+    T11: EncodeTypeDef,
+    T12: EncodeTypeDef,
+    R: BatchableResult + EncodeTypeDef,
+> JSFunction<fn(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12) -> R>
 {
     pub fn call<P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, P12>(
         &self,

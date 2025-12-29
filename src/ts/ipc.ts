@@ -175,13 +175,9 @@ function handleBinaryResponse(
 
       // Decode parameters using their respective types
       const params = typeInfo.paramTypes.map((paramType) => paramType.decode(decoder));
-      console.log("[IPC] Calling JS function ID:", fnId, "with params:", params);
 
       // Call the original JS function with decoded parameters
       const result = jsFunction(...params);
-
-      console.log("[IPC] JS function ID:", fnId, "returned:", result);
-      console.log("[IPC] Encoding result with return type:", typeInfo.returnType);
 
       // Encode the result using the return type
       typeInfo.returnType.encode(encoder, result);

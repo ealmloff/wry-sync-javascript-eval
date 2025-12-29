@@ -203,10 +203,7 @@ pub fn parse_item(program: &mut Program, item: syn::Item) -> syn::Result<()> {
 }
 
 /// Parse an extern "C" block
-fn parse_foreign_mod(
-    program: &mut Program,
-    foreign: syn::ItemForeignMod,
-) -> syn::Result<()> {
+fn parse_foreign_mod(program: &mut Program, foreign: syn::ItemForeignMod) -> syn::Result<()> {
     for item in foreign.items {
         match item {
             syn::ForeignItem::Fn(f) => {
@@ -306,10 +303,7 @@ fn extract_wasm_bindgen_attrs(attrs: &[syn::Attribute]) -> syn::Result<BindgenAt
 }
 
 /// Parse a foreign function declaration
-fn parse_foreign_fn(
-    f: syn::ForeignItemFn,
-    attrs: BindgenAttrs,
-) -> syn::Result<ImportFunction> {
+fn parse_foreign_fn(f: syn::ForeignItemFn, attrs: BindgenAttrs) -> syn::Result<ImportFunction> {
     let rust_name = f.sig.ident.clone();
     let js_name = attrs
         .js_name()

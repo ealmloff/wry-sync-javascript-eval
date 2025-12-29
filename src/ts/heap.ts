@@ -50,8 +50,6 @@ class JSHeap {
       return this.slots[id];
     }
 
-    console.log(`[JSHeap] Removing id ${id}`);
-
     const value = this.slots[id];
 
     this.slots[id] = undefined;

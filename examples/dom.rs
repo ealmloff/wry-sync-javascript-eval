@@ -1,12 +1,16 @@
 //! Example application using wry-testing library
 
-use js_sys::{Array, Date};
-use wasm_bindgen::{prelude::*, runtime::wait_for_js_event};
-use web_sys::{Document, Element, HtmlElement, Window};
+use wasm_bindgen::prelude::*;
+use web_sys::{Document, HtmlElement};
 use wry_testing::run;
 
 fn main() -> wry::Result<()> {
-    run(app)
+    run(|| {
+        app();
+
+        // The type here doesn't matter, we just want to wait forever.
+        _ = wait_for_js_result::<i32>();
+    })
 }
 
 fn app() {
@@ -17,11 +21,9 @@ fn app() {
     // that need to live beyond our function call.
 
     // Add a clock with #current-time that updates every second.
-    let body = document
-        .body()
-        .expect("document should have a body");
-    body.set_inner_html("
-        <div id='script'>
+    let body = document.body().expect("document should have a body");
+    body.set_inner_html(
+        "<div id='script'>
         <p>
             The current time is:
             <span id='current-time'>...</span>
@@ -35,15 +37,10 @@ fn app() {
             <span id='num-clicks'>0</span>
             times
         </p>
-        </div>
-    ");
+        </div>",
+    );
 
-
-    // setup_clock(&window, &document).unwrap();
     setup_clicker(&document);
-
-    // The type here doesn't matter, we just want to wait forever.
-    _ = wait_for_js_result::<i32>();
 }
 
 // We also want to count the number of times that our green square has been

@@ -56,8 +56,8 @@ class BoolType implements TypeClass {
  */
 class HeapRefType implements TypeClass {
   encode(encoder: DataEncoder, obj: unknown): void {
-    const id = window.jsHeap.insert(obj);
-    encoder.pushU64(id);
+    // Insert into heap but don't encode the id - Rust side is in sync with the slab
+    window.jsHeap.insert(obj);
   }
 
   decode(decoder: DataDecoder): unknown {

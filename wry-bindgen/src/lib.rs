@@ -40,9 +40,8 @@ pub mod __rt {
 
 macro_rules! cast {
     (($from:ty => $to:ty) $val:expr) => {{
-        static __SPEC: $crate::JsFunctionSpec = $crate::JsFunctionSpec::new(
-            || "(a0) => a0".to_string(),
-        );
+        static __SPEC: $crate::JsFunctionSpec =
+            $crate::JsFunctionSpec::new(|| "(a0) => a0".to_string());
         inventory::submit! {
             __SPEC
         }
@@ -57,7 +56,7 @@ macro_rules! to_js_value {
     ($ty:ty) => {
         impl From<$ty> for $crate::JsValue {
             fn from(val: $ty) -> Self {
-                cast!{($ty => $crate::JsValue) val}
+                cast! {($ty => $crate::JsValue) val}
             }
         }
     };
@@ -67,7 +66,7 @@ macro_rules! from_js_value {
     ($ty:ty) => {
         impl From<$crate::JsValue> for $ty {
             fn from(val: $crate::JsValue) -> Self {
-                cast!{($crate::JsValue => $ty) val}
+                cast! {($crate::JsValue => $ty) val}
             }
         }
     };
@@ -137,7 +136,9 @@ pub use value::JsValue;
 
 // Re-export commonly used items
 pub use batch::batch;
-pub use encode::{BatchableResult, BinaryDecode, BinaryEncode, EncodeTypeDef, TYPE_CACHED, TYPE_FULL};
+pub use encode::{
+    BatchableResult, BinaryDecode, BinaryEncode, EncodeTypeDef, TYPE_CACHED, TYPE_FULL,
+};
 pub use function::JSFunction;
 pub use ipc::{
     DecodeError, DecodedData, DecodedVariant, EncodedData, IPCMessage, MessageType, decode_data,
