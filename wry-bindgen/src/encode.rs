@@ -3,20 +3,15 @@
 //! This module provides traits for serializing and deserializing Rust types
 //! to/from the binary IPC protocol.
 
+use crate::Closure;
 use crate::batch::BatchState;
 #[cfg(feature = "runtime")]
-use crate::function::{RustValue, register_value};
+use crate::function::{RustCallback, register_value};
 use crate::ipc::{DecodeError, DecodedData, EncodedData};
 use crate::value::JsValue;
 #[cfg(feature = "runtime")]
 use slotmap::Key;
 use std::marker::PhantomData;
-
-/// Trait for creating a JavaScript type instance.
-/// Used to map Rust types to their JavaScript type constructors.
-pub trait TypeConstructor<P = ()> {
-    fn create_type_instance() -> String;
-}
 
 /// Trait for encoding Rust values into the binary protocol.
 /// Each type specifies how to serialize itself.
@@ -44,6 +39,54 @@ pub trait BatchableResult: BinaryDecode {
     fn batched_placeholder(batch: &mut BatchState) -> Self;
 }
 
+/// Marker for cached type definition (type already sent, just reference by ID)
+/// Format: [TYPE_CACHED] [type_id: u32]
+pub const TYPE_CACHED: u8 = 0xFF;
+
+/// Marker for full type definition (first time sending this type signature)
+/// Format: [TYPE_FULL] [type_id: u32] [param_count: u8] [param TypeDefs...] [return TypeDef]
+pub const TYPE_FULL: u8 = 0xFE;
+
+/// Type tags for the binary type definition protocol.
+/// Used to encode type information that JavaScript can parse to create TypeClass instances.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeTag {
+    // Primitive types
+    Null = 0,
+    Bool = 1,
+    U8 = 2,
+    U16 = 3,
+    U32 = 4,
+    U64 = 5,
+    U128 = 6,
+    I8 = 7,
+    I16 = 8,
+    I32 = 9,
+    I64 = 10,
+    I128 = 11,
+    F32 = 12,
+    F64 = 13,
+    Usize = 14,
+    Isize = 15,
+    String = 16,
+    HeapRef = 17,
+    // Compound types
+    /// Callback type: followed by param_count (u8), param TypeDefs..., return TypeDef
+    Callback = 18,
+    /// Option type: followed by inner TypeDef. Encodes as u8 flag (0=None, 1=Some) + value if Some
+    Option = 19,
+}
+
+/// Trait for types that can encode their type definition into the binary protocol.
+/// This is used to send type information to JavaScript for callback arguments.
+pub trait EncodeTypeDef {
+    /// Encode this type's definition into the buffer.
+    /// For primitives, this is just the TypeTag byte.
+    /// For callbacks, this includes param count, param types, and return type.
+    fn encode_type_def(buf: &mut Vec<u8>);
+}
+
 // Unit type implementations
 
 impl BatchableResult for () {
@@ -54,9 +97,9 @@ impl BatchableResult for () {
     fn batched_placeholder(_: &mut BatchState) -> Self {}
 }
 
-impl TypeConstructor for () {
-    fn create_type_instance() -> String {
-        "new window.NullType()".to_string()
+impl EncodeTypeDef for () {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        buf.push(TypeTag::Null as u8);
     }
 }
 
@@ -74,9 +117,9 @@ impl BinaryDecode for () {
 
 // Boolean implementations
 
-impl TypeConstructor for bool {
-    fn create_type_instance() -> String {
-        "new window.BoolType()".to_string()
+impl EncodeTypeDef for bool {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        buf.push(TypeTag::Bool as u8);
     }
 }
 
@@ -94,9 +137,9 @@ impl BinaryDecode for bool {
 
 // u8 implementations
 
-impl TypeConstructor for u8 {
-    fn create_type_instance() -> String {
-        "window.U8Type".to_string()
+impl EncodeTypeDef for u8 {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        buf.push(TypeTag::U8 as u8);
     }
 }
 
@@ -114,9 +157,9 @@ impl BinaryDecode for u8 {
 
 // u16 implementations
 
-impl TypeConstructor for u16 {
-    fn create_type_instance() -> String {
-        "window.U16Type".to_string()
+impl EncodeTypeDef for u16 {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        buf.push(TypeTag::U16 as u8);
     }
 }
 
@@ -134,9 +177,9 @@ impl BinaryDecode for u16 {
 
 // u32 implementations
 
-impl TypeConstructor for u32 {
-    fn create_type_instance() -> String {
-        "window.U32Type".to_string()
+impl EncodeTypeDef for u32 {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        buf.push(TypeTag::U32 as u8);
     }
 }
 
@@ -154,9 +197,9 @@ impl BinaryDecode for u32 {
 
 // u64 implementations
 
-impl TypeConstructor for u64 {
-    fn create_type_instance() -> String {
-        "window.U64Type".to_string()
+impl EncodeTypeDef for u64 {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        buf.push(TypeTag::U64 as u8);
     }
 }
 
@@ -172,11 +215,31 @@ impl BinaryDecode for u64 {
     }
 }
 
+// u128 implementations
+
+impl EncodeTypeDef for u128 {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        buf.push(TypeTag::U128 as u8);
+    }
+}
+
+impl BinaryEncode for u128 {
+    fn encode(self, encoder: &mut EncodedData) {
+        encoder.push_u128(self);
+    }
+}
+
+impl BinaryDecode for u128 {
+    fn decode(decoder: &mut DecodedData) -> Result<Self, DecodeError> {
+        Ok(decoder.take_u128()?)
+    }
+}
+
 // i8 implementations
 
-impl TypeConstructor for i8 {
-    fn create_type_instance() -> String {
-        "window.I8Type".to_string()
+impl EncodeTypeDef for i8 {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        buf.push(TypeTag::I8 as u8);
     }
 }
 
@@ -194,9 +257,9 @@ impl BinaryDecode for i8 {
 
 // i16 implementations
 
-impl TypeConstructor for i16 {
-    fn create_type_instance() -> String {
-        "window.I16Type".to_string()
+impl EncodeTypeDef for i16 {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        buf.push(TypeTag::I16 as u8);
     }
 }
 
@@ -214,9 +277,9 @@ impl BinaryDecode for i16 {
 
 // i32 implementations
 
-impl TypeConstructor for i32 {
-    fn create_type_instance() -> String {
-        "window.I32Type".to_string()
+impl EncodeTypeDef for i32 {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        buf.push(TypeTag::I32 as u8);
     }
 }
 
@@ -234,9 +297,9 @@ impl BinaryDecode for i32 {
 
 // i64 implementations
 
-impl TypeConstructor for i64 {
-    fn create_type_instance() -> String {
-        "window.I64Type".to_string()
+impl EncodeTypeDef for i64 {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        buf.push(TypeTag::I64 as u8);
     }
 }
 
@@ -252,11 +315,31 @@ impl BinaryDecode for i64 {
     }
 }
 
+// i128 implementations
+
+impl EncodeTypeDef for i128 {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        buf.push(TypeTag::I128 as u8);
+    }
+}
+
+impl BinaryEncode for i128 {
+    fn encode(self, encoder: &mut EncodedData) {
+        encoder.push_u128(self as u128);
+    }
+}
+
+impl BinaryDecode for i128 {
+    fn decode(decoder: &mut DecodedData) -> Result<Self, DecodeError> {
+        Ok(decoder.take_u128()? as i128)
+    }
+}
+
 // f32 implementations
 
-impl TypeConstructor for f32 {
-    fn create_type_instance() -> String {
-        "window.F32Type".to_string()
+impl EncodeTypeDef for f32 {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        buf.push(TypeTag::F32 as u8);
     }
 }
 
@@ -274,9 +357,9 @@ impl BinaryDecode for f32 {
 
 // f64 implementations
 
-impl TypeConstructor for f64 {
-    fn create_type_instance() -> String {
-        "window.F64Type".to_string()
+impl EncodeTypeDef for f64 {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        buf.push(TypeTag::F64 as u8);
     }
 }
 
@@ -294,9 +377,9 @@ impl BinaryDecode for f64 {
 
 // usize implementations (uses u64 for portability)
 
-impl TypeConstructor for usize {
-    fn create_type_instance() -> String {
-        "window.UsizeType".to_string()
+impl EncodeTypeDef for usize {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        buf.push(TypeTag::Usize as u8);
     }
 }
 
@@ -314,9 +397,9 @@ impl BinaryDecode for usize {
 
 // isize implementations (uses i64 for portability)
 
-impl TypeConstructor for isize {
-    fn create_type_instance() -> String {
-        "window.IsizeType".to_string()
+impl EncodeTypeDef for isize {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        buf.push(TypeTag::Isize as u8);
     }
 }
 
@@ -334,16 +417,23 @@ impl BinaryDecode for isize {
 
 // String/str implementations
 
-impl TypeConstructor for str {
-    fn create_type_instance() -> String {
-        "window.strType".to_string()
+impl EncodeTypeDef for str {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        buf.push(TypeTag::String as u8);
     }
 }
 
 // Explicit impl for &str since str is not Sized and blanket impl doesn't apply
-impl TypeConstructor for &str {
-    fn create_type_instance() -> String {
-        <str as TypeConstructor>::create_type_instance()
+impl EncodeTypeDef for &str {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        <str as EncodeTypeDef>::encode_type_def(buf);
+    }
+}
+
+// Blanket impl for &T references
+impl<T: EncodeTypeDef> EncodeTypeDef for &T {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        T::encode_type_def(buf);
     }
 }
 
@@ -353,9 +443,9 @@ impl BinaryEncode for &str {
     }
 }
 
-impl TypeConstructor for String {
-    fn create_type_instance() -> String {
-        <str as TypeConstructor>::create_type_instance()
+impl EncodeTypeDef for String {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        buf.push(TypeTag::String as u8);
     }
 }
 
@@ -373,9 +463,12 @@ impl BinaryDecode for String {
 
 // Option implementations
 
-impl<T: TypeConstructor<P>, P> TypeConstructor<P> for Option<T> {
-    fn create_type_instance() -> String {
-        format!("new window.OptionType({})", T::create_type_instance())
+impl<T: EncodeTypeDef> EncodeTypeDef for Option<T> {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        // Option encodes as: [Option tag] [inner type]
+        // Actual values encode as: [u8 flag (0=None, 1=Some)] [value if Some]
+        buf.push(TypeTag::Option as u8);
+        T::encode_type_def(buf);
     }
 }
 
@@ -418,13 +511,11 @@ impl<T: BinaryDecode> BatchableResult for Option<T> {
 
 // Result implementations
 
-impl<T: TypeConstructor<P>, E: TypeConstructor<P>, P> TypeConstructor<P> for Result<T, E> {
-    fn create_type_instance() -> String {
-        format!(
-            "new window.ResultType({}, {})",
-            T::create_type_instance(),
-            E::create_type_instance()
-        )
+impl<T: EncodeTypeDef, E: EncodeTypeDef> EncodeTypeDef for Result<T, E> {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        // Result encodes as: [1 byte flag] [Ok or Err type]
+        // For type purposes, we just encode the Ok type
+        T::encode_type_def(buf);
     }
 }
 
@@ -452,9 +543,9 @@ impl<T: BinaryDecode, E: BinaryDecode> BatchableResult for Result<T, E> {
 
 // JsValue implementations
 
-impl TypeConstructor for JsValue {
-    fn create_type_instance() -> String {
-        "new window.HeapRefType()".to_string()
+impl EncodeTypeDef for JsValue {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        buf.push(TypeTag::HeapRef as u8);
     }
 }
 
@@ -480,6 +571,16 @@ impl BatchableResult for JsValue {
     }
 }
 
+impl<F:?Sized> BatchableResult for Closure<F> {
+    fn needs_flush() -> bool {
+        false
+    }
+
+    fn batched_placeholder(batch: &mut BatchState) -> Self {
+        Closure { _phantom: PhantomData, value: JsValue::batched_placeholder(batch) }
+    }
+}
+
 /// Implement BatchableResult for types that always need a flush to get the result.
 macro_rules! impl_needs_flush {
     ($($ty:ty),*) => {
@@ -498,7 +599,7 @@ macro_rules! impl_needs_flush {
 }
 
 impl_needs_flush!(
-    bool, u8, u16, u32, u64, i8, i16, i32, i64, isize, usize, f32, f64, String
+    bool, u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, isize, usize, f32, f64, String
 );
 
 /// Marker trait for types that can be cheaply cloned for encoding.
@@ -534,79 +635,123 @@ impl BinaryEncode for &JsValue {
     }
 }
 
-impl<T: TypeConstructor<P>, P> TypeConstructor<(P,)> for &T {
-    fn create_type_instance() -> String {
-        T::create_type_instance()
-    }
-}
-
 // Stub implementations for FnMut callbacks passed to JS
 // These are used in methods like Array.every(), Array.forEach(), etc.
 // Real wasm-bindgen handles these with wasm trampolines, but we provide stubs.
 // Note: We only implement for `FnMut(...) -> R` since `FnMut(...)` is `FnMut(...) -> ()`.
+
+/// Wrapper type that encodes a callback registration key with Callback type info.
+/// This tells JS to create a RustFunction wrapper when decoding the value.
+/// The type parameter F should be `dyn FnMut(...) -> R` to capture the callback signature.
+#[cfg(feature = "runtime")]
+pub struct CallbackKey<F: ?Sized>(pub u64, pub PhantomData<F>);
+
+#[cfg(feature = "runtime")]
+impl<F: ?Sized> BinaryEncode for CallbackKey<F> {
+    fn encode(self, encoder: &mut EncodedData) {
+        encoder.push_u64(self.0);
+    }
+}
+macro_rules! count_args {
+    ($first:ident, $($arg:ident,)*) => {
+        1 + count_args!($($arg,)*)
+    };
+    () => {
+        0
+    };
+}
 macro_rules! impl_fnmut_stub {
     ($($arg:ident),*) => {
-        impl<R, $($arg,)*> BinaryEncode for &mut dyn FnMut($($arg),*) -> R {
-            fn encode(self, _encoder: &mut EncodedData) {
-                panic!("FnMut callbacks are not yet supported in wry-bindgen");
-            }
-        }
-
-        impl<R, $($arg,)*> TypeConstructor for &mut dyn FnMut($($arg),*) -> R {
-            fn create_type_instance() -> String {
-                "new window.CallbackType()".to_string()
-            }
-        }
-
-        impl<R, $($arg,)*> crate::Closure<dyn FnMut($($arg),*) -> R> {
-            #[allow(non_snake_case)]
-            pub fn call(&mut self, $($arg: $arg),*) -> R {
-                (self.value)($($arg),*)
-            }
-        }
-
+        // Implement EncodeTypeDef for CallbackKey so it encodes as Callback type
         #[cfg(feature = "runtime")]
-        impl<R: BinaryEncode<P> + 'static, P, $($arg,)*> BinaryEncode<RustCallbackMarker<(P, fn($($arg,)*) -> R)>> for crate::Closure<dyn FnMut($($arg),*) -> R>
-        where
-            $($arg: BinaryDecode + 'static, )*
+        impl<R, $($arg,)*> EncodeTypeDef for CallbackKey<dyn FnMut($($arg),*) -> R>
+            where
+            $($arg: EncodeTypeDef + 'static, )*
+            R: EncodeTypeDef + 'static,
         {
-            fn encode(mut self, encoder: &mut EncodedData) {
+            #[allow(unused)]
+            fn encode_type_def(buf: &mut Vec<u8>) {
+                buf.push(TypeTag::Callback as u8);
+                buf.push(count_args!($($arg,)*));
+                $(<$arg as EncodeTypeDef>::encode_type_def(buf);)*
+                <R as EncodeTypeDef>::encode_type_def(buf);
+            }
+        }
+
+        impl<R, $($arg,)*> BinaryEncode for &mut dyn FnMut($($arg),*) -> R where
+            $($arg: BinaryDecode + 'static, )*
+            R: BinaryEncode + 'static
+        {
+            fn encode(self, encoder: &mut EncodedData) {
+                let raw_pointer = self as *mut dyn FnMut($($arg),*) -> R;
+                let static_raw_pointer: *mut (dyn FnMut($($arg),*) -> R + 'static) = unsafe { std::mem::transmute(raw_pointer) };
                 #[allow(unused)]
                 #[allow(non_snake_case)]
-                let value = register_value(RustValue::new(
+                let value = register_value(RustCallback::new(
                     move |decoder: &mut DecodedData, encoder: &mut EncodedData| {
                         // Decode arguments
                         $(let $arg = <$arg as BinaryDecode>::decode(decoder).unwrap();)*
-                        let result = self.call($($arg),*);
+                        let f: &mut (dyn FnMut($($arg),*) -> R) = unsafe { &mut *static_raw_pointer };
+                        let result = f($($arg),*);
                         result.encode(encoder);
                     },
                 ));
-
                 encoder.push_u64(value.data().as_ffi());
             }
         }
 
-        #[cfg(feature = "runtime")]
-        impl<R: BinaryEncode<P> + 'static, P, $($arg,)*> BinaryEncode<RustCallbackMarker<(P, fn($($arg,)*) -> R)>> for &crate::Closure<dyn FnMut($($arg),*) -> R>
-        where
-            $($arg: BinaryDecode + 'static, )*
+        impl<R, F, $($arg,)*> From<F> for crate::Closure<dyn FnMut($($arg),*) -> R>
+            where F: FnMut($($arg),*) -> R + 'static,
+            $($arg: BinaryDecode + EncodeTypeDef + 'static, )*
+            R: BinaryEncode + EncodeTypeDef + 'static,
         {
-            fn encode(self, _: &mut EncodedData) {
-                todo!()
+            #[allow(non_snake_case)]
+            #[allow(unused)]
+            fn from(mut f: F) -> Self {
+                let key = register_value(RustCallback::new(
+                    move |decoder: &mut DecodedData, encoder: &mut EncodedData| {
+                        // Decode arguments using BinaryDecode directly
+                        $(let $arg = <$arg as BinaryDecode>::decode(decoder).unwrap();)*
+                        let result = f($($arg),*);
+                        result.encode(encoder);
+                    },
+                ));
+                static __SPEC: $crate::JsFunctionSpec = $crate::JsFunctionSpec::new(
+                    || "(a0) => a0".to_string(),
+                );
+                inventory::submit! {
+                    __SPEC
+                }
+                // Use CallbackKey so param encodes as Callback type (JS creates RustFunction)
+                // Return type is Closure which encodes as HeapRef (JS inserts into heap)
+                let func: $crate::JSFunction<fn(CallbackKey<dyn FnMut($($arg),*) -> R>) -> Self> = $crate::FUNCTION_REGISTRY
+                    .get_function(__SPEC)
+                    .expect("Function not found: new_function");
+                func.call(CallbackKey(key.data().as_ffi(), PhantomData))
             }
         }
-        
-        #[cfg(feature = "runtime")]
-        impl<R: TypeConstructor<P>, P, $($arg,)*> TypeConstructor<RustCallbackMarker<(P, fn($($arg,)*) -> R)>> for crate::Closure<dyn FnMut($($arg),*) -> R>
-        where
-            $($arg: TypeConstructor, )*
+
+        // Implement EncodeTypeDef for Closure - encodes as HeapRef since it's a JS heap reference
+        impl<R, $($arg,)*> EncodeTypeDef for crate::Closure<dyn FnMut($($arg),*) -> R>
+            where
+            $($arg: EncodeTypeDef + 'static, )*
+            R: EncodeTypeDef + 'static,
         {
-            fn create_type_instance() -> String {
-                let args: std::vec::Vec<String> = std::vec![$($arg::create_type_instance(),)*];
-                std::format!("new window.CallbackType([{}], {})",
-                    args.join(", "),
-                    R::create_type_instance(),
-                )
+            #[allow(unused)]
+            fn encode_type_def(buf: &mut Vec<u8>) {
+                JsValue::encode_type_def(buf);
+            }
+        }
+
+        // Implement EncodeTypeDef for &mut dyn FnMut so callback arguments work
+        impl<R, $($arg,)*> EncodeTypeDef for &mut dyn FnMut($($arg),*) -> R
+            where
+            $($arg: EncodeTypeDef + 'static, )*
+            R: EncodeTypeDef + 'static,
+        {
+            #[allow(unused)]
+            fn encode_type_def(buf: &mut Vec<u8>) {
+                JsValue::encode_type_def(buf);
             }
         }
     };
@@ -621,130 +766,82 @@ impl_fnmut_stub!(A1, A2, A3, A4, A5);
 impl_fnmut_stub!(A1, A2, A3, A4, A5, A6);
 impl_fnmut_stub!(A1, A2, A3, A4, A5, A6, A7);
 
-// Slice encoding implementations - used for TypedArray constructors
-macro_rules! impl_slice_encode {
-    ($ty:ty, $push:ident) => {
-        impl BinaryEncode for &[$ty] {
-            fn encode(self, encoder: &mut EncodedData) {
-                encoder.push_u32(self.len() as u32);
-                for &val in self {
-                    encoder.$push(val as _);
-                }
-            }
-        }
-
-        impl BinaryEncode for &mut [$ty] {
-            fn encode(self, encoder: &mut EncodedData) {
-                encoder.push_u32(self.len() as u32);
-                for &val in self.iter() {
-                    encoder.$push(val as _);
-                }
-            }
-        }
-
-        impl TypeConstructor for [$ty] {
-            fn create_type_instance() -> String {
-                concat!("new window.", stringify!($ty), "ArrayType()").to_string()
-            }
-        }
-
-        // Explicit impls for slice references since [T] is not Sized
-        impl TypeConstructor for &[$ty] {
-            fn create_type_instance() -> String {
-                <[$ty] as TypeConstructor>::create_type_instance()
-            }
-        }
-
-        impl TypeConstructor for &mut [$ty] {
-            fn create_type_instance() -> String {
-                <[$ty] as TypeConstructor>::create_type_instance()
-            }
-        }
-    };
+impl<F: ?Sized> BinaryDecode for crate::Closure<F> {
+    fn decode(decoder: &mut DecodedData) -> Result<Self, DecodeError> {
+        // Decode the JsValue wrapping the closure
+        let value = crate::JsValue::decode(decoder)?;
+        Ok(Self {
+            _phantom: PhantomData,
+            value,
+        })
+    }
 }
 
-impl_slice_encode!(u8, push_u8);
-impl_slice_encode!(i8, push_u8);
-impl_slice_encode!(u16, push_u16);
-impl_slice_encode!(i16, push_u16);
-impl_slice_encode!(u32, push_u32);
-impl_slice_encode!(i32, push_u32);
-impl_slice_encode!(u64, push_u64);
-impl_slice_encode!(i64, push_u64);
+impl<F: ?Sized> BinaryEncode for crate::Closure<F> {
+    fn encode(self, encoder: &mut EncodedData) {
+        // Encode the JsValue
+        self.value.encode(encoder);
+    }
+}
 
-impl BinaryEncode for &[f32] {
+impl<F: ?Sized> BinaryEncode for &crate::Closure<F> {
+    fn encode(self, encoder: &mut EncodedData) {
+        // Encode the JsValue
+        (&self.value).encode(encoder);
+    }
+}
+
+impl<T> EncodeTypeDef for Vec<T> {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        // Vec encodes as a JS Array, which is a heap reference
+        buf.push(TypeTag::HeapRef as u8);
+    }
+}
+
+impl<T> EncodeTypeDef for &[T] {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        // Slices encode as JS Arrays, which are heap references
+        buf.push(TypeTag::HeapRef as u8);
+    }
+}
+
+impl<T> EncodeTypeDef for &mut [T] {
+    fn encode_type_def(buf: &mut Vec<u8>) {
+        // Slices encode as JS Arrays, which are heap references
+        buf.push(TypeTag::HeapRef as u8);
+    }
+}
+
+impl<T: BinaryEncode> BinaryEncode for Vec<T> {
     fn encode(self, encoder: &mut EncodedData) {
         encoder.push_u32(self.len() as u32);
-        for &val in self {
-            encoder.push_u32(val.to_bits());
+        for val in self {
+            val.encode(encoder);
         }
     }
 }
 
-impl BinaryEncode for &mut [f32] {
+impl<T> BinaryEncode for &[T]
+where
+    for<'a> &'a T: BinaryEncode,
+{
     fn encode(self, encoder: &mut EncodedData) {
         encoder.push_u32(self.len() as u32);
-        for &val in self.iter() {
-            encoder.push_u32(val.to_bits());
+        for val in self {
+            val.encode(encoder);
         }
     }
 }
 
-impl TypeConstructor for [f32] {
-    fn create_type_instance() -> String {
-        "new window.Float32ArrayType()".to_string()
-    }
-}
-
-impl TypeConstructor for &[f32] {
-    fn create_type_instance() -> String {
-        <[f32] as TypeConstructor>::create_type_instance()
-    }
-}
-
-impl TypeConstructor for &mut [f32] {
-    fn create_type_instance() -> String {
-        <[f32] as TypeConstructor>::create_type_instance()
-    }
-}
-
-impl BinaryEncode for &[f64] {
+impl<T> BinaryEncode for &mut [T]
+where
+    for<'a> &'a T: BinaryEncode,
+{
     fn encode(self, encoder: &mut EncodedData) {
         encoder.push_u32(self.len() as u32);
-        for &val in self {
-            encoder.push_u64(val.to_bits());
+        for val in self {
+            val.encode(encoder);
         }
     }
 }
 
-impl BinaryEncode for &mut [f64] {
-    fn encode(self, encoder: &mut EncodedData) {
-        encoder.push_u32(self.len() as u32);
-        for &val in self.iter() {
-            encoder.push_u64(val.to_bits());
-        }
-    }
-}
-
-impl TypeConstructor for [f64] {
-    fn create_type_instance() -> String {
-        "new window.Float64ArrayType()".to_string()
-    }
-}
-
-impl TypeConstructor for &[f64] {
-    fn create_type_instance() -> String {
-        <[f64] as TypeConstructor>::create_type_instance()
-    }
-}
-
-impl TypeConstructor for &mut [f64] {
-    fn create_type_instance() -> String {
-        <[f64] as TypeConstructor>::create_type_instance()
-    }
-}
-
-/// Marker type for Rust callback parameter types.
-pub struct RustCallbackMarker<P> {
-    phantom: PhantomData<P>,
-}

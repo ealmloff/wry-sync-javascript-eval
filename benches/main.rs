@@ -1,16 +1,7 @@
 use std::time::{Duration, Instant};
-use wasm_bindgen::wasm_bindgen;
 
 mod batching;
 mod roundtrip;
-
-#[wasm_bindgen(inline_js = "export function heap_objects_alive(f) {
-        return window.jsHeap.heapObjectsAlive();
-    }")]
-extern "C" {
-    #[wasm_bindgen(js_name = heap_objects_alive)]
-    pub fn heap_objects_alive() -> u32;
-}
 
 struct BenchResult {
     name: String,
@@ -32,8 +23,6 @@ impl BenchResult {
 }
 
 fn bench<F: Fn()>(name: &str, f: F) -> BenchResult {
-    let before_heap = heap_objects_alive();
-
     let warmup_iters = 10;
     for _ in 0..warmup_iters {
         f();
@@ -48,15 +37,6 @@ fn bench<F: Fn()>(name: &str, f: F) -> BenchResult {
     let elapsed = start.elapsed();
 
     let avg_time = elapsed.div_f64(iterations as f64);
-
-    let after_heap = heap_objects_alive();
-    if before_heap != after_heap {
-        eprintln!(
-            "WARNING: {} leaked {} heap objects",
-            name,
-            after_heap - before_heap
-        );
-    }
 
     BenchResult {
         name: name.to_string(),
@@ -88,7 +68,10 @@ fn main() {
         results.push(bench("roundtrip/f64", roundtrip::bench_roundtrip_f64));
         results.push(bench("roundtrip/bool", roundtrip::bench_roundtrip_bool));
         results.push(bench("roundtrip/string", roundtrip::bench_roundtrip_string));
-        results.push(bench("roundtrip/large-string", roundtrip::bench_roundtrip_large_string));
+        results.push(bench(
+            "roundtrip/large-string",
+            roundtrip::bench_roundtrip_large_string,
+        ));
         results.push(bench(
             "roundtrip/option_some",
             roundtrip::bench_roundtrip_option_some,
@@ -100,8 +83,14 @@ fn main() {
 
         results.push(bench("batch/add_1_calls", batching::bench_batch_add_1));
         results.push(bench("batch/add_100_calls", batching::bench_batch_add_100));
-        results.push(bench("batch/create_element_1_calls", batching::bench_batch_create_element_1));
-        results.push(bench("batch/create_element_100_calls", batching::bench_batch_create_element_100));
+        results.push(bench(
+            "batch/create_element_1_calls",
+            batching::bench_batch_create_element_1,
+        ));
+        results.push(bench(
+            "batch/create_element_100_calls",
+            batching::bench_batch_create_element_100,
+        ));
 
         for result in &results {
             result.print();

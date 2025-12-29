@@ -34,19 +34,88 @@ pub mod __rt {
     /// This function is only called for TypedArray::view() which requires wasm memory.
     #[inline]
     pub unsafe fn wbg_cast<From: ?Sized, To>(_val: &From) -> To {
-        panic!("wbg_cast is not supported in wry-bindgen - TypedArray::view() requires wasm memory")
+        todo!()
     }
 }
 
+macro_rules! cast {
+    (($from:ty => $to:ty) $val:expr) => {{
+        static __SPEC: $crate::JsFunctionSpec = $crate::JsFunctionSpec::new(
+            || "(a0) => a0".to_string(),
+        );
+        inventory::submit! {
+            __SPEC
+        }
+        let func: $crate::JSFunction<fn($from) -> $to> = $crate::FUNCTION_REGISTRY
+            .get_function(__SPEC)
+            .expect("Function not found: new_function");
+        func.call($val)
+    }};
+}
+
+macro_rules! to_js_value {
+    ($ty:ty) => {
+        impl From<$ty> for $crate::JsValue {
+            fn from(val: $ty) -> Self {
+                cast!{($ty => $crate::JsValue) val}
+            }
+        }
+    };
+}
+
+macro_rules! from_js_value {
+    ($ty:ty) => {
+        impl From<$crate::JsValue> for $ty {
+            fn from(val: $crate::JsValue) -> Self {
+                cast!{($crate::JsValue => $ty) val}
+            }
+        }
+    };
+}
+
+to_js_value!(i8);
+from_js_value!(i8);
+to_js_value!(i16);
+from_js_value!(i16);
+to_js_value!(i32);
+from_js_value!(i32);
+to_js_value!(i64);
+from_js_value!(i64);
+to_js_value!(i128);
+from_js_value!(i128);
+to_js_value!(u8);
+from_js_value!(u8);
+to_js_value!(u16);
+from_js_value!(u16);
+to_js_value!(u32);
+from_js_value!(u32);
+to_js_value!(u64);
+from_js_value!(u64);
+to_js_value!(u128);
+from_js_value!(u128);
+to_js_value!(f32);
+from_js_value!(f32);
+to_js_value!(f64);
+from_js_value!(f64);
+to_js_value!(usize);
+from_js_value!(usize);
+to_js_value!(isize);
+from_js_value!(isize);
+to_js_value!(&str);
+to_js_value!(String);
+from_js_value!(String);
+to_js_value!(());
+from_js_value!(());
+
 /// Closure type for passing Rust closures to JavaScript.
 pub struct Closure<T: ?Sized> {
-    pub(crate) value: Box<T>,
+    _phantom: std::marker::PhantomData<T>,
+    pub(crate) value: JsValue,
 }
 
 impl<T: ?Sized> Closure<T> {
-    /// Creates a new Closure
-    pub fn new(value: Box<T>) -> Self {
-        Self { value }
+    pub fn new<F: Into<Closure<T>>>(f: F) -> Self {
+        f.into()
     }
 
     /// Forgets the closure, leaking it.
@@ -57,7 +126,7 @@ impl<T: ?Sized> Closure<T> {
 
 impl<T: ?Sized> AsRef<JsValue> for Closure<T> {
     fn as_ref(&self) -> &JsValue {
-        todo!()
+        &self.value
     }
 }
 
@@ -68,7 +137,7 @@ pub use value::JsValue;
 
 // Re-export commonly used items
 pub use batch::batch;
-pub use encode::{BatchableResult, BinaryDecode, BinaryEncode, TypeConstructor};
+pub use encode::{BatchableResult, BinaryDecode, BinaryEncode, EncodeTypeDef, TYPE_CACHED, TYPE_FULL};
 pub use function::JSFunction;
 pub use ipc::{
     DecodeError, DecodedData, DecodedVariant, EncodedData, IPCMessage, MessageType, decode_data,
@@ -80,7 +149,6 @@ pub use runtime::{WryRuntime, get_runtime, set_event_loop_proxy, wait_for_js_res
 pub use wry_bindgen_macro::wasm_bindgen;
 
 // Re-export inventory for macro use
-
 pub use inventory;
 
 /// Function specification for the registry
@@ -88,7 +156,6 @@ pub use inventory;
 pub struct JsFunctionSpec {
     /// Function that generates the JS code
     pub js_code: fn() -> String,
-    pub type_info: fn() -> (Vec<String>, String),
 }
 
 /// Inline JS module info
@@ -129,8 +196,8 @@ impl InlineJsModule {
 inventory::collect!(InlineJsModule);
 
 impl JsFunctionSpec {
-    pub const fn new(js_code: fn() -> String, type_info: fn() -> (Vec<String>, String)) -> Self {
-        Self { js_code, type_info }
+    pub const fn new(js_code: fn() -> String) -> Self {
+        Self { js_code }
     }
 }
 
@@ -190,21 +257,14 @@ impl FunctionRegistry {
         }
 
         // Now set up the function registry after all modules are loaded
+        // Store raw JS functions - type info will be passed at call time
         script.push_str("  window.setFunctionRegistry([");
         for (i, spec) in specs.iter().enumerate() {
             if i > 0 {
                 script.push_str(",\n");
             }
-            let (args, return_type) = (spec.type_info)();
             let js_code = (spec.js_code)();
-            write!(
-                &mut script,
-                "window.createWrapperFunction([{}], {}, {})",
-                args.join(", "),
-                return_type,
-                js_code
-            )
-            .unwrap();
+            write!(&mut script, "{}", js_code).unwrap();
         }
         script.push_str("]);\n");
 
@@ -295,7 +355,7 @@ pub mod prelude {
     pub use crate::UnwrapThrowExt;
     pub use crate::batch::batch;
     pub use crate::cast::JsCast;
-    pub use crate::encode::{BatchableResult, BinaryDecode, BinaryEncode, TypeConstructor};
+    pub use crate::encode::{BatchableResult, BinaryDecode, BinaryEncode, EncodeTypeDef};
     pub use crate::function::JSFunction;
     pub use crate::lazy::JsThreadLocal;
     #[cfg(feature = "runtime")]

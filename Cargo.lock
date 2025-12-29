@@ -3625,6 +3625,7 @@ dependencies = [
  "base64",
  "bytemuck",
  "inventory",
+ "js-sys 0.3.83",
  "lazy-js-bundle",
  "serde",
  "serde_json",

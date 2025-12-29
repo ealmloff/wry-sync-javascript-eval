@@ -5,21 +5,66 @@
 
 #[cfg(feature = "runtime")]
 use std::any::Any;
-#[cfg(feature = "runtime")]
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::marker::PhantomData;
 
 #[cfg(feature = "runtime")]
 use slotmap::{DefaultKey, SlotMap};
 
 use crate::batch::run_js_sync;
-use crate::encode::{BatchableResult, BinaryEncode};
+use crate::encode::{BatchableResult, BinaryEncode, EncodeTypeDef, TYPE_CACHED, TYPE_FULL};
+use crate::ipc::EncodedData;
 #[cfg(feature = "runtime")]
-use crate::ipc::{DecodedData, EncodedData};
+use crate::ipc::DecodedData;
 
 /// Reserved function ID for dropping native Rust refs when JS objects are GC'd.
 /// JS sends this when a FinalizationRegistry callback fires for a RustFunction.
 pub const DROP_NATIVE_REF_FN_ID: u32 = 0xFFFFFFFF;
+
+thread_local! {
+    /// Cache mapping type definition bytes to the assigned type_id for the JS side
+    static TYPE_CACHE: RefCell<HashMap<Vec<u8>, u32>> = RefCell::new(HashMap::new());
+    /// Next type ID to assign
+    static NEXT_TYPE_ID: Cell<u32> = Cell::new(0);
+}
+
+/// Encode type definitions for a function call.
+/// On first call for a type signature, sends TYPE_FULL + id + param_count + type defs.
+/// On subsequent calls, sends TYPE_CACHED + id.
+fn encode_function_types(
+    encoder: &mut EncodedData,
+    encode_types: impl FnOnce(&mut Vec<u8>),
+) {
+    // Always encode type definitions to get the bytes
+    let mut type_buf = Vec::new();
+    encode_types(&mut type_buf);
+
+    TYPE_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(&id) = cache.get(&type_buf) {
+            // Cached - just send marker + ID
+            encoder.push_u8(TYPE_CACHED);
+            encoder.push_u32(id);
+        } else {
+            // First time - send full type def + ID
+            let id = NEXT_TYPE_ID.with(|n| {
+                let id = n.get();
+                n.set(id + 1);
+                id
+            });
+            cache.insert(type_buf.clone(), id);
+
+            encoder.push_u8(TYPE_FULL);
+            encoder.push_u32(id);
+
+            // Push the type definition bytes
+            for byte in type_buf {
+                encoder.push_u8(byte);
+            }
+        }
+    });
+}
 
 /// A reference to a JavaScript function that can be called from Rust.
 ///
@@ -44,37 +89,53 @@ impl<T> JSFunction<T> {
     }
 }
 
-impl<R: BatchableResult> JSFunction<fn() -> R> {
+impl<R: BatchableResult + EncodeTypeDef> JSFunction<fn() -> R> {
     pub fn call(&self) -> R {
-        run_js_sync::<R>(self.id, |_| {})
+        run_js_sync::<R>(self.id, |encoder| {
+            encode_function_types(encoder, |buf| {
+                buf.push(0); // param_count = 0
+                R::encode_type_def(buf);
+            });
+        })
     }
 }
 
-impl<T1, R: BatchableResult> JSFunction<fn(T1) -> R> {
+impl<T1: EncodeTypeDef, R: BatchableResult + EncodeTypeDef> JSFunction<fn(T1) -> R> {
     pub fn call<P1>(&self, arg: T1) -> R
     where
         T1: BinaryEncode<P1>,
     {
         run_js_sync::<R>(self.id, |encoder| {
+            encode_function_types(encoder, |buf| {
+                buf.push(1); // param_count = 1
+                T1::encode_type_def(buf);
+                R::encode_type_def(buf);
+            });
             arg.encode(encoder);
         })
     }
 }
 
-impl<T1, T2, R: BatchableResult> JSFunction<fn(T1, T2) -> R> {
+impl<T1: EncodeTypeDef, T2: EncodeTypeDef, R: BatchableResult + EncodeTypeDef> JSFunction<fn(T1, T2) -> R> {
     pub fn call<P1, P2>(&self, arg1: T1, arg2: T2) -> R
     where
         T1: BinaryEncode<P1>,
         T2: BinaryEncode<P2>,
     {
         run_js_sync::<R>(self.id, |encoder| {
+            encode_function_types(encoder, |buf| {
+                buf.push(2); // param_count = 2
+                T1::encode_type_def(buf);
+                T2::encode_type_def(buf);
+                R::encode_type_def(buf);
+            });
             arg1.encode(encoder);
             arg2.encode(encoder);
         })
     }
 }
 
-impl<T1, T2, T3, R: BatchableResult> JSFunction<fn(T1, T2, T3) -> R> {
+impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, R: BatchableResult + EncodeTypeDef> JSFunction<fn(T1, T2, T3) -> R> {
     pub fn call<P1, P2, P3>(&self, arg1: T1, arg2: T2, arg3: T3) -> R
     where
         T1: BinaryEncode<P1>,
@@ -82,6 +143,13 @@ impl<T1, T2, T3, R: BatchableResult> JSFunction<fn(T1, T2, T3) -> R> {
         T3: BinaryEncode<P3>,
     {
         run_js_sync::<R>(self.id, |encoder| {
+            encode_function_types(encoder, |buf| {
+                buf.push(3);
+                T1::encode_type_def(buf);
+                T2::encode_type_def(buf);
+                T3::encode_type_def(buf);
+                R::encode_type_def(buf);
+            });
             arg1.encode(encoder);
             arg2.encode(encoder);
             arg3.encode(encoder);
@@ -89,7 +157,7 @@ impl<T1, T2, T3, R: BatchableResult> JSFunction<fn(T1, T2, T3) -> R> {
     }
 }
 
-impl<T1, T2, T3, T4, R: BatchableResult> JSFunction<fn(T1, T2, T3, T4) -> R> {
+impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef, R: BatchableResult + EncodeTypeDef> JSFunction<fn(T1, T2, T3, T4) -> R> {
     pub fn call<P1, P2, P3, P4>(&self, arg1: T1, arg2: T2, arg3: T3, arg4: T4) -> R
     where
         T1: BinaryEncode<P1>,
@@ -98,6 +166,14 @@ impl<T1, T2, T3, T4, R: BatchableResult> JSFunction<fn(T1, T2, T3, T4) -> R> {
         T4: BinaryEncode<P4>,
     {
         run_js_sync::<R>(self.id, |encoder| {
+            encode_function_types(encoder, |buf| {
+                buf.push(4);
+                T1::encode_type_def(buf);
+                T2::encode_type_def(buf);
+                T3::encode_type_def(buf);
+                T4::encode_type_def(buf);
+                R::encode_type_def(buf);
+            });
             arg1.encode(encoder);
             arg2.encode(encoder);
             arg3.encode(encoder);
@@ -106,7 +182,7 @@ impl<T1, T2, T3, T4, R: BatchableResult> JSFunction<fn(T1, T2, T3, T4) -> R> {
     }
 }
 
-impl<T1, T2, T3, T4, T5, R: BatchableResult> JSFunction<fn(T1, T2, T3, T4, T5) -> R> {
+impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef, T5: EncodeTypeDef, R: BatchableResult + EncodeTypeDef> JSFunction<fn(T1, T2, T3, T4, T5) -> R> {
     pub fn call<P1, P2, P3, P4, P5>(&self, arg1: T1, arg2: T2, arg3: T3, arg4: T4, arg5: T5) -> R
     where
         T1: BinaryEncode<P1>,
@@ -116,6 +192,15 @@ impl<T1, T2, T3, T4, T5, R: BatchableResult> JSFunction<fn(T1, T2, T3, T4, T5) -
         T5: BinaryEncode<P5>,
     {
         run_js_sync::<R>(self.id, |encoder| {
+            encode_function_types(encoder, |buf| {
+                buf.push(5);
+                T1::encode_type_def(buf);
+                T2::encode_type_def(buf);
+                T3::encode_type_def(buf);
+                T4::encode_type_def(buf);
+                T5::encode_type_def(buf);
+                R::encode_type_def(buf);
+            });
             arg1.encode(encoder);
             arg2.encode(encoder);
             arg3.encode(encoder);
@@ -125,7 +210,7 @@ impl<T1, T2, T3, T4, T5, R: BatchableResult> JSFunction<fn(T1, T2, T3, T4, T5) -
     }
 }
 
-impl<T1, T2, T3, T4, T5, T6, R: BatchableResult> JSFunction<fn(T1, T2, T3, T4, T5, T6) -> R> {
+impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef, T5: EncodeTypeDef, T6: EncodeTypeDef, R: BatchableResult + EncodeTypeDef> JSFunction<fn(T1, T2, T3, T4, T5, T6) -> R> {
     pub fn call<P1, P2, P3, P4, P5, P6>(
         &self,
         arg1: T1,
@@ -144,6 +229,16 @@ impl<T1, T2, T3, T4, T5, T6, R: BatchableResult> JSFunction<fn(T1, T2, T3, T4, T
         T6: BinaryEncode<P6>,
     {
         run_js_sync::<R>(self.id, |encoder| {
+            encode_function_types(encoder, |buf| {
+                buf.push(6);
+                T1::encode_type_def(buf);
+                T2::encode_type_def(buf);
+                T3::encode_type_def(buf);
+                T4::encode_type_def(buf);
+                T5::encode_type_def(buf);
+                T6::encode_type_def(buf);
+                R::encode_type_def(buf);
+            });
             arg1.encode(encoder);
             arg2.encode(encoder);
             arg3.encode(encoder);
@@ -154,7 +249,7 @@ impl<T1, T2, T3, T4, T5, T6, R: BatchableResult> JSFunction<fn(T1, T2, T3, T4, T
     }
 }
 
-impl<T1, T2, T3, T4, T5, T6, T7, R: BatchableResult>
+impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef, T5: EncodeTypeDef, T6: EncodeTypeDef, T7: EncodeTypeDef, R: BatchableResult + EncodeTypeDef>
     JSFunction<fn(T1, T2, T3, T4, T5, T6, T7) -> R>
 {
     pub fn call<P1, P2, P3, P4, P5, P6, P7>(
@@ -177,6 +272,17 @@ impl<T1, T2, T3, T4, T5, T6, T7, R: BatchableResult>
         T7: BinaryEncode<P7>,
     {
         run_js_sync::<R>(self.id, |encoder| {
+            encode_function_types(encoder, |buf| {
+                buf.push(7);
+                T1::encode_type_def(buf);
+                T2::encode_type_def(buf);
+                T3::encode_type_def(buf);
+                T4::encode_type_def(buf);
+                T5::encode_type_def(buf);
+                T6::encode_type_def(buf);
+                T7::encode_type_def(buf);
+                R::encode_type_def(buf);
+            });
             arg1.encode(encoder);
             arg2.encode(encoder);
             arg3.encode(encoder);
@@ -188,7 +294,7 @@ impl<T1, T2, T3, T4, T5, T6, T7, R: BatchableResult>
     }
 }
 
-impl<T1, T2, T3, T4, T5, T6, T7, T8, R: BatchableResult>
+impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef, T5: EncodeTypeDef, T6: EncodeTypeDef, T7: EncodeTypeDef, T8: EncodeTypeDef, R: BatchableResult + EncodeTypeDef>
     JSFunction<fn(T1, T2, T3, T4, T5, T6, T7, T8) -> R>
 {
     pub fn call<P1, P2, P3, P4, P5, P6, P7, P8>(
@@ -213,6 +319,18 @@ impl<T1, T2, T3, T4, T5, T6, T7, T8, R: BatchableResult>
         T8: BinaryEncode<P8>,
     {
         run_js_sync::<R>(self.id, |encoder| {
+            encode_function_types(encoder, |buf| {
+                buf.push(8);
+                T1::encode_type_def(buf);
+                T2::encode_type_def(buf);
+                T3::encode_type_def(buf);
+                T4::encode_type_def(buf);
+                T5::encode_type_def(buf);
+                T6::encode_type_def(buf);
+                T7::encode_type_def(buf);
+                T8::encode_type_def(buf);
+                R::encode_type_def(buf);
+            });
             arg1.encode(encoder);
             arg2.encode(encoder);
             arg3.encode(encoder);
@@ -225,7 +343,7 @@ impl<T1, T2, T3, T4, T5, T6, T7, T8, R: BatchableResult>
     }
 }
 
-impl<T1, T2, T3, T4, T5, T6, T7, T8, T9, R: BatchableResult>
+impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef, T5: EncodeTypeDef, T6: EncodeTypeDef, T7: EncodeTypeDef, T8: EncodeTypeDef, T9: EncodeTypeDef, R: BatchableResult + EncodeTypeDef>
     JSFunction<fn(T1, T2, T3, T4, T5, T6, T7, T8, T9) -> R>
 {
     pub fn call<P1, P2, P3, P4, P5, P6, P7, P8, P9>(
@@ -252,6 +370,19 @@ impl<T1, T2, T3, T4, T5, T6, T7, T8, T9, R: BatchableResult>
         T9: BinaryEncode<P9>,
     {
         run_js_sync::<R>(self.id, |encoder| {
+            encode_function_types(encoder, |buf| {
+                buf.push(9);
+                T1::encode_type_def(buf);
+                T2::encode_type_def(buf);
+                T3::encode_type_def(buf);
+                T4::encode_type_def(buf);
+                T5::encode_type_def(buf);
+                T6::encode_type_def(buf);
+                T7::encode_type_def(buf);
+                T8::encode_type_def(buf);
+                T9::encode_type_def(buf);
+                R::encode_type_def(buf);
+            });
             arg1.encode(encoder);
             arg2.encode(encoder);
             arg3.encode(encoder);
@@ -265,7 +396,7 @@ impl<T1, T2, T3, T4, T5, T6, T7, T8, T9, R: BatchableResult>
     }
 }
 
-impl<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, R: BatchableResult>
+impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef, T5: EncodeTypeDef, T6: EncodeTypeDef, T7: EncodeTypeDef, T8: EncodeTypeDef, T9: EncodeTypeDef, T10: EncodeTypeDef, R: BatchableResult + EncodeTypeDef>
     JSFunction<fn(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10) -> R>
 {
     pub fn call<P1, P2, P3, P4, P5, P6, P7, P8, P9, P10>(
@@ -294,6 +425,20 @@ impl<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, R: BatchableResult>
         T10: BinaryEncode<P10>,
     {
         run_js_sync::<R>(self.id, |encoder| {
+            encode_function_types(encoder, |buf| {
+                buf.push(10);
+                T1::encode_type_def(buf);
+                T2::encode_type_def(buf);
+                T3::encode_type_def(buf);
+                T4::encode_type_def(buf);
+                T5::encode_type_def(buf);
+                T6::encode_type_def(buf);
+                T7::encode_type_def(buf);
+                T8::encode_type_def(buf);
+                T9::encode_type_def(buf);
+                T10::encode_type_def(buf);
+                R::encode_type_def(buf);
+            });
             arg1.encode(encoder);
             arg2.encode(encoder);
             arg3.encode(encoder);
@@ -308,7 +453,7 @@ impl<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, R: BatchableResult>
     }
 }
 
-impl<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, R: BatchableResult>
+impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef, T5: EncodeTypeDef, T6: EncodeTypeDef, T7: EncodeTypeDef, T8: EncodeTypeDef, T9: EncodeTypeDef, T10: EncodeTypeDef, T11: EncodeTypeDef, R: BatchableResult + EncodeTypeDef>
     JSFunction<fn(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11) -> R>
 {
     pub fn call<P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11>(
@@ -339,6 +484,21 @@ impl<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, R: BatchableResult>
         T11: BinaryEncode<P11>,
     {
         run_js_sync::<R>(self.id, |encoder| {
+            encode_function_types(encoder, |buf| {
+                buf.push(11);
+                T1::encode_type_def(buf);
+                T2::encode_type_def(buf);
+                T3::encode_type_def(buf);
+                T4::encode_type_def(buf);
+                T5::encode_type_def(buf);
+                T6::encode_type_def(buf);
+                T7::encode_type_def(buf);
+                T8::encode_type_def(buf);
+                T9::encode_type_def(buf);
+                T10::encode_type_def(buf);
+                T11::encode_type_def(buf);
+                R::encode_type_def(buf);
+            });
             arg1.encode(encoder);
             arg2.encode(encoder);
             arg3.encode(encoder);
@@ -354,7 +514,7 @@ impl<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, R: BatchableResult>
     }
 }
 
-impl<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, R: BatchableResult>
+impl<T1: EncodeTypeDef, T2: EncodeTypeDef, T3: EncodeTypeDef, T4: EncodeTypeDef, T5: EncodeTypeDef, T6: EncodeTypeDef, T7: EncodeTypeDef, T8: EncodeTypeDef, T9: EncodeTypeDef, T10: EncodeTypeDef, T11: EncodeTypeDef, T12: EncodeTypeDef, R: BatchableResult + EncodeTypeDef>
     JSFunction<fn(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12) -> R>
 {
     pub fn call<P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, P12>(
@@ -387,6 +547,22 @@ impl<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, R: BatchableResult>
         T12: BinaryEncode<P12>,
     {
         run_js_sync::<R>(self.id, |encoder| {
+            encode_function_types(encoder, |buf| {
+                buf.push(12);
+                T1::encode_type_def(buf);
+                T2::encode_type_def(buf);
+                T3::encode_type_def(buf);
+                T4::encode_type_def(buf);
+                T5::encode_type_def(buf);
+                T6::encode_type_def(buf);
+                T7::encode_type_def(buf);
+                T8::encode_type_def(buf);
+                T9::encode_type_def(buf);
+                T10::encode_type_def(buf);
+                T11::encode_type_def(buf);
+                T12::encode_type_def(buf);
+                R::encode_type_def(buf);
+            });
             arg1.encode(encoder);
             arg2.encode(encoder);
             arg3.encode(encoder);
@@ -405,12 +581,12 @@ impl<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, R: BatchableResult>
 
 /// Internal type for storing Rust callback functions.
 #[cfg(feature = "runtime")]
-pub(crate) struct RustValue {
+pub(crate) struct RustCallback {
     pub(crate) f: Box<dyn FnMut(&mut DecodedData, &mut EncodedData)>,
 }
 
 #[cfg(feature = "runtime")]
-impl RustValue {
+impl RustCallback {
     pub fn new<F>(f: F) -> Self
     where
         F: FnMut(&mut DecodedData, &mut EncodedData) + 'static,
@@ -445,7 +621,7 @@ thread_local! {
 
 /// Register a callback with the thread-local encoder using a short borrow
 #[cfg(feature = "runtime")]
-pub(crate) fn register_value(callback: RustValue) -> DefaultKey {
+pub(crate) fn register_value(callback: RustCallback) -> DefaultKey {
     THREAD_LOCAL_FUNCTION_ENCODER
         .with(|fn_encoder| fn_encoder.borrow_mut().register_value(callback))
 }

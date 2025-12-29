@@ -195,12 +195,12 @@ fn generate_type(ty: &ImportType, krate: &TokenStream) -> syn::Result<TokenStrea
         });
     }
 
-    // Generate TypeConstructor implementation
-    // All JS types use HeapRefType since they're references to JS heap objects
-    let type_constructor_impl = quote_spanned! {span=>
-        impl #krate::TypeConstructor for #rust_name {
-            fn create_type_instance() -> String {
-                <#krate::JsValue as #krate::TypeConstructor>::create_type_instance()
+    // Generate EncodeTypeDef implementation
+    // All JS types use HeapRef since they're references to JS heap objects
+    let encode_type_def_impl = quote_spanned! {span=>
+        impl #krate::EncodeTypeDef for #rust_name {
+            fn encode_type_def(buf: &mut Vec<u8>) {
+                <#krate::JsValue as #krate::EncodeTypeDef>::encode_type_def(buf);
             }
         }
     };
@@ -246,9 +246,7 @@ fn generate_type(ty: &ImportType, krate: &TokenStream) -> syn::Result<TokenStrea
     let jscast_impl = quote_spanned! {span=>
         impl #krate::JsCast for #rust_name {
             fn instanceof(val: &#krate::JsValue) -> bool {
-                // For now, always return false - proper instanceof requires JS runtime check
-                let _ = val;
-                false
+                true
             }
 
             fn unchecked_from_js(val: #krate::JsValue) -> Self {
@@ -268,7 +266,7 @@ fn generate_type(ty: &ImportType, krate: &TokenStream) -> syn::Result<TokenStrea
         #into_jsvalue
         #deref_impls
         #from_parents
-        #type_constructor_impl
+        #encode_type_def_impl
         #binary_encode_impl
         #binary_decode_impl
         #batchable_impl
@@ -312,20 +310,11 @@ fn generate_function(
     let fn_params = &args.fn_params;
     let fn_types = &args.fn_types;
     let call_values = &args.call_values;
-    let type_constructors = &args.type_constructors;
 
     // Generate return type
     let ret_type = match &func.ret {
         Some(ty) => quote_spanned! {span=> #ty },
         None => quote_spanned! {span=> () },
-    };
-
-    // Generate return type constructor
-    let ret_type_constructor = match &func.ret {
-        Some(_ty) => {
-            quote_spanned! {span=> <#ret_type as #krate::TypeConstructor<_>>::create_type_instance() }
-        }
-        None => quote_spanned! {span=> "new window.NullType()".to_string() },
     };
 
     // For non-inline_js, generate a simple closure that returns a constant string
@@ -336,7 +325,6 @@ fn generate_function(
     let func_body = quote_spanned! {span=>
         static __SPEC: #krate::JsFunctionSpec = #krate::JsFunctionSpec::new(
             || format!(#js_code_str),
-            || (#type_constructors, #ret_type_constructor),
         );
 
         #krate::inventory::submit! {
@@ -504,7 +492,7 @@ fn generate_js_code(
         }
         ImportFunctionKind::Setter { property, .. } => (
             "(obj, value)".to_string(),
-            format!("{{{{ obj.{} = value; }}}}", property),
+            format!("obj.{} = value", property),
         ),
         ImportFunctionKind::Constructor { class } => {
             // Use a{index} naming to avoid conflicts with JS reserved words
@@ -580,8 +568,6 @@ struct GeneratedArgs {
     fn_types: TokenStream,
     /// Values to pass to call: `&self.obj, arg1, arg2`
     call_values: TokenStream,
-    /// Type constructor expressions
-    type_constructors: TokenStream,
 }
 
 /// Generate argument lists
@@ -589,7 +575,6 @@ fn generate_args(func: &ImportFunction, krate: &TokenStream) -> syn::Result<Gene
     let mut fn_params = Vec::new();
     let mut fn_types = Vec::new();
     let mut call_values = Vec::new();
-    let mut type_constructors = Vec::new();
     let span = func.rust_name.span();
 
     // For methods, add self as first call arg (but not as fn param since we use &self)
@@ -599,9 +584,6 @@ fn generate_args(func: &ImportFunction, krate: &TokenStream) -> syn::Result<Gene
         | ImportFunctionKind::Setter { .. } => {
             fn_types.push(quote_spanned! {span=> &#krate::JsValue });
             call_values.push(quote_spanned! {span=> &self.obj });
-            type_constructors.push(
-                quote_spanned! {span=> <&#krate::JsValue as #krate::TypeConstructor<_>>::create_type_instance() },
-            );
         }
         _ => {}
     }
@@ -613,9 +595,6 @@ fn generate_args(func: &ImportFunction, krate: &TokenStream) -> syn::Result<Gene
         fn_params.push(quote_spanned! {span=> #name: #ty });
         fn_types.push(quote_spanned! {span=> #ty });
         call_values.push(quote_spanned! {span=> #name });
-        type_constructors.push(
-            quote_spanned! {span=> <#ty as #krate::TypeConstructor<_>>::create_type_instance() },
-        );
     }
 
     let fn_params_tokens = if fn_params.is_empty() {
@@ -636,15 +615,10 @@ fn generate_args(func: &ImportFunction, krate: &TokenStream) -> syn::Result<Gene
         quote_spanned! {span=> #(#call_values),* }
     };
 
-    let type_constructors_tokens = quote_spanned! {span=>
-        std::vec![#(#type_constructors),*]
-    };
-
     Ok(GeneratedArgs {
         fn_params: fn_params_tokens,
         fn_types: fn_types_tokens,
         call_values: call_values_tokens,
-        type_constructors: type_constructors_tokens,
     })
 }
 
@@ -673,18 +647,14 @@ fn generate_static(st: &ImportStatic, krate: &TokenStream) -> syn::Result<TokenS
     // Generate JavaScript code to access the static
     let js_code = generate_static_js_code(st);
 
-    // Generate the type constructor for the return type
-    let ret_type_constructor =
-        quote_spanned! {span=> <#ty as #krate::TypeConstructor<_>>::create_type_instance() };
-
     assert!(st.thread_local_v2);
 
     // Generate a lazily-initialized thread-local static
+    // Type information is now passed at call time via JSFunction::call
     Ok(quote_spanned! {span=>
         #vis static #rust_name: #krate::JsThreadLocal<#ty> = {
             static __SPEC: #krate::JsFunctionSpec = #krate::JsFunctionSpec::new(
                 || format!(#js_code),
-                || (std::vec![] as std::vec::Vec<String>, #ret_type_constructor),
             );
 
             #krate::inventory::submit! {
@@ -782,13 +752,13 @@ fn generate_string_enum(string_enum: &StringEnum, krate: &TokenStream) -> syn::R
         }
     };
 
-    // Generate TypeConstructor implementation
-    // String enums use StringEnumType with a lookup array for efficient u32 encoding
-    let type_constructor_impl = quote! {
-        impl #krate::TypeConstructor for #enum_name {
-            fn create_type_instance() -> String {
-                format!("new window.StringEnumType([{}])",
-                    vec![#(#variant_values),*].join(", "))
+    // Generate EncodeTypeDef implementation
+    // String enums encode as u32 discriminant
+    let encode_type_def_impl = quote! {
+        impl #krate::EncodeTypeDef for #enum_name {
+            fn encode_type_def(buf: &mut Vec<u8>) {
+                // String enums encode as u32 (discriminant)
+                <u32 as #krate::EncodeTypeDef>::encode_type_def(buf);
             }
         }
     };
@@ -841,7 +811,7 @@ fn generate_string_enum(string_enum: &StringEnum, krate: &TokenStream) -> syn::R
     Ok(quote! {
         #enum_def
         #impl_methods
-        #type_constructor_impl
+        #encode_type_def_impl
         #binary_encode_impl
         #binary_decode_impl
         #batchable_impl

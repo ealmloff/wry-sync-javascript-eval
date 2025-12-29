@@ -67,6 +67,11 @@ impl BatchState {
             unreachable!("Attempted to release reserved JS heap ID {}", id);
         }
 
+        debug_assert!(
+            !self.free_ids.contains(&id) && !self.ids_to_free.iter().any(|ids| ids.contains(&id)),
+            "Double-free detected for heap ID {}",
+            id
+        );
         match self.ids_to_free.last_mut() {
             Some(ids) => ids.push(id),
             None => self.free_ids.push(id),
@@ -131,6 +136,7 @@ pub fn is_batching() -> bool {
 /// Queue a JS drop operation for a heap ID.
 /// This is called when a JsValue is dropped.
 pub(crate) fn queue_js_drop(id: u64) {
+    debug_assert!(id >= JSIDX_RESERVED, "Attempted to drop reserved JS heap ID {}", id);
     let drop_fn: JSFunction<fn(u64) -> ()> = JSFunction::new(DROP_HEAP_REF_FN_ID);
     drop_fn.call(id);
     BATCH_STATE.with(|state| {

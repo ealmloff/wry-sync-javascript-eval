@@ -35,6 +35,13 @@ class DataEncoder {
     this.pushU32(high);
   }
 
+  pushU128(value: number) {
+    const low = value >>> 0;
+    const high = Math.floor(value / 0x10000000000000000) >>> 0;
+    this.pushU64(low);
+    this.pushU64(high);
+  }
+
   pushF32(value: number) {
     const floatBuf = new Float32Array(1);
     floatBuf[0] = value;
@@ -166,6 +173,12 @@ class DataDecoder {
     return low + high * 0x100000000;
   }
 
+  takeU128(): number {
+    const low = this.takeU64();
+    const high = this.takeU64();
+    return low + high * 0x10000000000000000;
+  }
+
   takeF32(): number {
     const intVal = this.takeU32();
     const intBuf = new Uint32Array(1);
@@ -215,6 +228,30 @@ class DataDecoder {
     // Convert high part to signed 32-bit first
     const signedHigh = high | 0;
     return low + signedHigh * 0x100000000;
+  }
+
+  takeI128(): number {
+    const low = this.takeU64();
+    const high = this.takeU64();
+    // Convert high part to signed 32-bit first
+    const signedHigh = high | 0;
+    return low + signedHigh * 0x10000000000000000;
+  }
+
+  /**
+   * Get the remaining bytes from the u8 buffer as a Uint8Array.
+   * Used for parsing type definitions.
+   */
+  getRemainingBytes(): Uint8Array {
+    return this.u8Buf.subarray(this.u8Offset);
+  }
+
+  /**
+   * Skip a number of bytes in the u8 buffer.
+   * Used after parsing type definitions to advance past consumed bytes.
+   */
+  skipBytes(count: number): void {
+    this.u8Offset += count;
   }
 }
 

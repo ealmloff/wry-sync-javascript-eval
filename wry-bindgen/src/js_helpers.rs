@@ -53,14 +53,6 @@ extern "C" {
     #[wasm_bindgen(js_name = "debug_string")]
     pub(crate) fn js_debug_string(x: &JsValue) -> String;
 
-    /// Create a JsValue from a string.
-    #[wasm_bindgen(js_name = "str_to_jsvalue")]
-    pub(crate) fn js_string_to_jsvalue(s: &str) -> JsValue;
-
-    /// Create a JsValue from a float.
-    #[wasm_bindgen(js_name = "float_to_jsvalue")]
-    pub(crate) fn js_float_to_jsvalue(n: f64) -> JsValue;
-
     // Arithmetic operators
     #[wasm_bindgen(js_name = "js_checked_div")]
     pub(crate) fn js_checked_div(a: &JsValue, b: &JsValue) -> JsValue;

@@ -165,6 +165,7 @@ impl IPCMessage {
 }
 
 /// Decoded message variant.
+#[derive(Debug)]
 pub enum DecodedVariant<'a> {
     /// Response from JS/Rust
     Respond { data: DecodedData<'a> },
@@ -173,6 +174,7 @@ pub enum DecodedVariant<'a> {
 }
 
 /// Decoded binary data with aligned buffer access.
+#[derive(Debug)]
 pub struct DecodedData<'a> {
     u8_buf: &'a [u8],
     u16_buf: &'a [u16],
@@ -259,6 +261,13 @@ impl<'a> DecodedData<'a> {
         Ok((high << 32) | low)
     }
 
+    /// Take a u128 from the buffer
+    pub fn take_u128(&mut self) -> Result<u128, DecodeError> {
+        let low = self.take_u64()? as u128;
+        let high = self.take_u64()? as u128;
+        Ok((high << 64) | low)
+    }
+
     /// Take a string from the buffer.
     pub fn take_str(&mut self) -> Result<&'a str, DecodeError> {
         let len = self.take_u32()? as usize;
@@ -324,6 +333,12 @@ impl EncodedData {
     pub fn push_u64(&mut self, value: u64) {
         self.push_u32((value & 0xFFFFFFFF) as u32);
         self.push_u32((value >> 32) as u32);
+    }
+
+    /// Push a u128 to the buffer
+    pub fn push_u128(&mut self, value: u128) {
+        self.push_u64((value & 0xFFFFFFFFFFFFFFFF) as u64);
+        self.push_u64((value >> 64) as u64);
     }
 
     /// Push a string to the buffer.

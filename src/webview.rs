@@ -25,9 +25,7 @@ fn decode_request_data(request: &wry::http::Request<Vec<u8>>) -> Option<IPCMessa
 }
 
 enum WebviewLoadingState {
-    Pending {
-        queued: Vec<IPCMessage>,
-    },
+    Pending { queued: Vec<IPCMessage> },
     Loaded,
 }
 
@@ -48,7 +46,11 @@ pub(crate) struct State {
 }
 
 impl State {
-    pub fn new(function_registry: &'static FunctionRegistry, proxy: EventLoopProxy<AppEvent>, headless: bool) -> Self {
+    pub fn new(
+        function_registry: &'static FunctionRegistry,
+        proxy: EventLoopProxy<AppEvent>,
+        headless: bool,
+    ) -> Self {
         Self {
             function_registry,
             window: None,
@@ -123,11 +125,10 @@ impl ApplicationHandler<AppEvent> for State {
             .build_as_child(&window)
             .unwrap();
 
-            let script = self.function_registry.script();
-            println!("Injecting function registry script:\n{}", script);
-        webview
-            .evaluate_script(script)
-            .unwrap();
+            webview.open_devtools();
+        let script = self.function_registry.script();
+        println!("Injecting function registry script:\n{}", script);
+        webview.evaluate_script(script).unwrap();
 
         self.window = Some(window);
         self.webview = Some(webview);

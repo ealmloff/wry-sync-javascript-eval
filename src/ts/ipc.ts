@@ -14,12 +14,17 @@
  */
 
 import { DataDecoder, DataEncoder } from "./encoding";
-import { getFunctionRegistry } from "./function_registry";
+import { getFunctionRegistry, getTypeCache, CachedTypeInfo } from "./function_registry";
+import { parseTypeDef, TypeClass } from "./types";
 
 enum MessageType {
   Evaluate = 0,
   Respond = 1,
 }
+
+// Type caching markers - must match Rust's TYPE_CACHED and TYPE_FULL
+const TYPE_CACHED = 0xff;
+const TYPE_FULL = 0xfe;
 
 // Reserved function ID for dropping heap refs - must match Rust's DROP_HEAP_REF_FN_ID
 const DROP_HEAP_REF_FN_ID = 0xffffffff;
@@ -74,6 +79,48 @@ function evaluate_from_rust_binary(dataBase64: string): DataDecoder | null {
 }
 
 /**
+ * Parse type information from the decoder.
+ * Handles both cached and full type definitions.
+ */
+function parseTypeInfo(decoder: DataDecoder): CachedTypeInfo {
+  const typeCache = getTypeCache();
+  const typeMarker = decoder.takeU8();
+
+  if (typeMarker === TYPE_CACHED) {
+    // Cached type - look up by ID
+    const typeId = decoder.takeU32();
+    const cached = typeCache.get(typeId);
+    if (!cached) {
+      throw new Error(`Unknown cached type ID: ${typeId}`);
+    }
+    return cached;
+  } else if (typeMarker === TYPE_FULL) {
+    // Full type definition - parse and cache
+    const typeId = decoder.takeU32();
+    const paramCount = decoder.takeU8();
+
+    // Get the remaining bytes for parsing type definitions
+    const typeBytes = decoder.getRemainingBytes();
+    const offset = { value: 0 };
+
+    const paramTypes: TypeClass[] = [];
+    for (let i = 0; i < paramCount; i++) {
+      paramTypes.push(parseTypeDef(typeBytes, offset));
+    }
+    const returnType = parseTypeDef(typeBytes, offset);
+
+    // Advance the decoder past the type definition bytes we consumed
+    decoder.skipBytes(offset.value);
+
+    const cached: CachedTypeInfo = { paramTypes, returnType };
+    typeCache.set(typeId, cached);
+    return cached;
+  } else {
+    throw new Error(`Unknown type marker: ${typeMarker}`);
+  }
+}
+
+/**
  * Handle binary response from Rust.
  * May contain nested Evaluate calls (for callbacks).
  */
@@ -100,6 +147,8 @@ function handleBinaryResponse(
     // Process all operations
     while (decoder.hasMoreU32()) {
       const fnId = decoder.takeU32();
+      // Parse type information (cached or full)
+      const typeInfo = parseTypeInfo(decoder);
 
       // Handle special drop function
       if (fnId === DROP_HEAP_REF_FN_ID) {
@@ -117,13 +166,24 @@ function handleBinaryResponse(
         continue;
       }
 
+      // Get the raw JS function
       const functionRegistry = getFunctionRegistry();
-      const spec = functionRegistry[fnId];
-      if (!spec) {
+      const jsFunction = functionRegistry[fnId];
+      if (!jsFunction) {
         throw new Error("Unknown function ID in response: " + fnId);
       }
 
-      spec(decoder, encoder);
+      // Decode parameters using their respective types
+      const params = typeInfo.paramTypes.map((paramType) => paramType.decode(decoder));
+      console.log("[IPC] Calling JS function ID:", fnId, "with params:", params);
+
+      // Call the original JS function with decoded parameters
+      const result = jsFunction(...params);
+
+      console.log("[IPC] JS function ID:", fnId, "returned:", result);
+
+      // Encode the result using the return type
+      typeInfo.returnType.encode(encoder, result);
     }
 
     const nextResponse = sync_request_binary(

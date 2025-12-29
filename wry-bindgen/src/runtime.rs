@@ -10,7 +10,7 @@ use slotmap::{DefaultKey, KeyData};
 use winit::event_loop::EventLoopProxy;
 
 use crate::encode::BinaryDecode;
-use crate::function::{DROP_NATIVE_REF_FN_ID, RustValue, THREAD_LOCAL_FUNCTION_ENCODER};
+use crate::function::{DROP_NATIVE_REF_FN_ID, RustCallback, THREAD_LOCAL_FUNCTION_ENCODER};
 use crate::ipc::{DecodedData, DecodedVariant, IPCMessage};
 
 /// Application-level events that can be sent through the event loop.
@@ -160,7 +160,7 @@ fn handle_rust_callback(runtime: &WryRuntime, data: &mut DecodedData) {
             if let Some(mut function) = function {
                 // Downcast to RustCallback and call it
                 let function_callback = function
-                    .downcast_mut::<RustValue>()
+                    .downcast_mut::<RustCallback>()
                     .expect("Failed to downcast to RustCallback");
 
                 let response = IPCMessage::new_respond(|encoder| {
@@ -178,6 +178,8 @@ fn handle_rust_callback(runtime: &WryRuntime, data: &mut DecodedData) {
                         .unwrap()
                         .replace(function);
                 });
+            } else {
+                panic!("Function not found for key: {:?}", key);
             }
         }
         // Drop a native Rust object when JS GC'd the wrapper

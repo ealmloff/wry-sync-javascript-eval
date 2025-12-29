@@ -2,6 +2,33 @@ import { DataEncoder, DataDecoder } from "./encoding";
 import { RustFunction } from "./rust_function";
 
 /**
+ * Type tags for the binary type definition protocol.
+ * Must match the Rust TypeTag enum exactly.
+ */
+enum TypeTag {
+  Null = 0,
+  Bool = 1,
+  U8 = 2,
+  U16 = 3,
+  U32 = 4,
+  U64 = 5,
+  U128 = 6,
+  I8 = 7,
+  I16 = 8,
+  I32 = 9,
+  I64 = 10,
+  I128 = 11,
+  F32 = 12,
+  F64 = 13,
+  Usize = 14,
+  Isize = 15,
+  String = 16,
+  HeapRef = 17,
+  Callback = 18,
+  Option = 19,
+}
+
+/**
  * Base interface for all type classes
  */
 interface TypeClass {
@@ -110,13 +137,15 @@ class NullType implements TypeClass {
   }
 }
 
+type NumberType = "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i64" | "i128" | "usize" | "isize" | "f32" | "f64";
+
 /**
  * Type class for numeric values (u8, u16, u32, u64, i8, i16, i32, i64, usize, isize, f32, f64) with encoding/decoding methods
  */
 class NumericType implements TypeClass {
-  private size: "u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32" | "i64" | "usize" | "isize" | "f32" | "f64";
+  private size: NumberType;
 
-  constructor(size: "u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32" | "i64" | "usize" | "isize" | "f32" | "f64") {
+  constructor(size: NumberType) {
     this.size = size;
   }
 
@@ -134,6 +163,9 @@ class NumericType implements TypeClass {
       case "u64":
         encoder.pushU64(value);
         break;
+      case "u128":
+        encoder.pushU128(value);
+        break;
       case "i8":
         // Signed integers encode as unsigned (Rust: self as u8)
         encoder.pushU8(value & 0xff);
@@ -149,6 +181,10 @@ class NumericType implements TypeClass {
       case "i64":
         // Signed integers encode as unsigned (Rust: self as u64)
         encoder.pushU64(value);
+        break;
+      case "i128":
+        // Signed integers encode as unsigned (Rust: self as u128)
+        encoder.pushU128(value);
         break;
       case "usize":
         // usize encodes as u64
@@ -177,6 +213,8 @@ class NumericType implements TypeClass {
         return decoder.takeU32();
       case "u64":
         return decoder.takeU64();
+      case "u128":
+        return decoder.takeU128();
       case "i8":
         return decoder.takeI8();
       case "i16":
@@ -185,6 +223,8 @@ class NumericType implements TypeClass {
         return decoder.takeI32();
       case "i64":
         return decoder.takeI64();
+      case "i128":
+        return decoder.takeI128();
       case "usize":
         // usize decodes as u64
         return decoder.takeU64();
@@ -262,35 +302,17 @@ class ResultType implements TypeClass {
   }
 }
 
-/**
- * Creates a wrapper function that handles encoding/decoding for a JS function
- */
-function createWrapperFunction(
-  paramTypes: TypeClass[],
-  returnType: TypeClass,
-  jsFunction: (...args: any[]) => any
-): (decoder: DataDecoder, encoder: DataEncoder) => void {
-  return (decoder: DataDecoder, encoder: DataEncoder) => {
-    // Decode parameters using their respective types
-    const params = paramTypes.map((paramType) => paramType.decode(decoder));
-
-    // Call the original JS function with decoded parameters
-    const result = jsFunction(...params);
-
-    // Encode the result using the return type
-    returnType.encode(encoder, result);
-  };
-}
-
 // Pre-instantiated numeric type classes
 export const U8Type = new NumericType("u8");
 export const U16Type = new NumericType("u16");
 export const U32Type = new NumericType("u32");
 export const U64Type = new NumericType("u64");
+export const U128Type = new NumericType("u128");
 export const I8Type = new NumericType("i8");
 export const I16Type = new NumericType("i16");
 export const I32Type = new NumericType("i32");
 export const I64Type = new NumericType("i64");
+export const I128Type = new NumericType("i128");
 export const UsizeType = new NumericType("usize");
 export const IsizeType = new NumericType("isize");
 export const F32Type = new NumericType("f32");
@@ -299,8 +321,77 @@ export const F64Type = new NumericType("f64");
 // Pre-instantiated string type class
 export const strType = new StringType();
 
+// Pre-instantiated singleton types
+const boolTypeInstance = new BoolType();
+const nullTypeInstance = new NullType();
+const heapRefTypeInstance = new HeapRefType();
+const stringTypeInstance = new StringType();
+
+/**
+ * Parse a TypeDef from a byte array and return a TypeClass.
+ * This is a recursive function that handles nested callbacks.
+ */
+function parseTypeDef(bytes: Uint8Array, offset: { value: number }): TypeClass {
+  const tag = bytes[offset.value++];
+
+  switch (tag) {
+    case TypeTag.Null:
+      return nullTypeInstance;
+    case TypeTag.Bool:
+      return boolTypeInstance;
+    case TypeTag.U8:
+      return U8Type;
+    case TypeTag.U16:
+      return U16Type;
+    case TypeTag.U32:
+      return U32Type;
+    case TypeTag.U64:
+      return U64Type;
+    case TypeTag.U128:
+      return U128Type;
+    case TypeTag.I8:
+      return I8Type;
+    case TypeTag.I16:
+      return I16Type;
+    case TypeTag.I32:
+      return I32Type;
+    case TypeTag.I64:
+      return I64Type;
+    case TypeTag.I128:
+      return I128Type;
+    case TypeTag.F32:
+      return F32Type;
+    case TypeTag.F64:
+      return F64Type;
+    case TypeTag.Usize:
+      return UsizeType;
+    case TypeTag.Isize:
+      return IsizeType;
+    case TypeTag.String:
+      return stringTypeInstance;
+    case TypeTag.HeapRef:
+      return heapRefTypeInstance;
+    case TypeTag.Callback: {
+      const paramCount = bytes[offset.value++];
+      const paramTypes: TypeClass[] = [];
+      for (let i = 0; i < paramCount; i++) {
+        paramTypes.push(parseTypeDef(bytes, offset));
+      }
+      const returnType = parseTypeDef(bytes, offset);
+      return new CallbackType(paramTypes, returnType);
+    }
+    case TypeTag.Option: {
+      const innerType = parseTypeDef(bytes, offset);
+      return new OptionType(innerType);
+    }
+    default:
+      throw new Error(`Unknown TypeTag: ${tag}`);
+  }
+}
+
 export {
   TypeClass,
+  TypeTag,
   BoolType,
   HeapRefType,
   CallbackType,
@@ -310,5 +401,5 @@ export {
   StringType,
   StringEnumType,
   ResultType,
-  createWrapperFunction,
+  parseTypeDef,
 };

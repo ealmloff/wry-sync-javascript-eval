@@ -102,14 +102,12 @@ impl JsValue {
 
     /// Creates a JS string from a Rust string.
     pub fn from_str(s: &str) -> JsValue {
-        crate::js_helpers::js_string_to_jsvalue(s)
+        s.into()
     }
 
     /// Creates a JS number from an f64.
-    ///
-    /// Note: This is a stub implementation for API compatibility.
     pub fn from_f64(n: f64) -> JsValue {
-        crate::js_helpers::js_float_to_jsvalue(n)
+        n.into()
     }
 }
 
@@ -137,6 +135,42 @@ impl Drop for JsValue {
 
         // Drop the value on the JS heap
         crate::batch::queue_js_drop(self.idx);
+    }
+}
+
+impl PartialEq<&str> for JsValue {
+    fn eq(&self, other: &&str) -> bool {
+        match self.as_string() {
+            Some(s) => &s == other,
+            None => false,
+        }
+    }
+}
+
+impl PartialEq<JsValue> for &str {
+    fn eq(&self, other: &JsValue) -> bool {
+        match other.as_string() {
+            Some(s) => self == &s,
+            None => false,
+        }
+    }
+}
+
+impl PartialEq<u32> for JsValue {
+    fn eq(&self, other: &u32) -> bool {
+        match self.as_f64() {
+            Some(n) => n == (*other as f64),
+            None => false,
+        }
+    }
+}
+
+impl PartialEq<JsValue> for u32 {
+    fn eq(&self, other: &JsValue) -> bool {
+        match other.as_f64() {
+            Some(n) => (*self as f64) == n,
+            None => false,
+        }
     }
 }
 
@@ -313,9 +347,12 @@ impl JsValue {
 
     /// Check if this value is null.
     pub fn is_null(&self) -> bool {
+        eprintln!("[DEBUG is_null] self.idx={}, JSIDX_NULL={}, eq={}", self.idx, JSIDX_NULL, self.idx == JSIDX_NULL);
         if self.idx == JSIDX_NULL {
+            eprintln!("[DEBUG is_null] returning true early");
             return true;
         }
+        eprintln!("[DEBUG is_null] calling js_is_null");
         crate::js_helpers::js_is_null(self)
     }
 
@@ -451,62 +488,11 @@ impl Rem<&JsValue> for &JsValue {
     }
 }
 
-// From implementations for primitive types
-// These create JsValue wrappers. In real wasm-bindgen these would create JS values on heap.
-// Here they're stubs that panic since we can't create JS primitives from Rust directly.
-
-macro_rules! impl_from_for_jsvalue {
-    ($($ty:ty),*) => {
-        $(
-            impl From<$ty> for JsValue {
-                fn from(_val: $ty) -> Self {
-                    panic!("JsValue::from::<{}>() is not supported in wry-bindgen - use JS bindings instead", stringify!($ty));
-                }
-            }
-        )*
-    };
-}
-
-impl_from_for_jsvalue!(
-    i8, u8, i16, u16, i32, u32, i64, u64, i128, u128, isize, usize, f32, f64
-);
-
 impl From<bool> for JsValue {
     fn from(val: bool) -> Self {
         JsValue::from_bool(val)
     }
 }
-
-impl From<&str> for JsValue {
-    fn from(_val: &str) -> Self {
-        panic!("JsValue::from::<&str>() is not supported in wry-bindgen - use JS bindings instead");
-    }
-}
-
-impl From<String> for JsValue {
-    fn from(_val: String) -> Self {
-        panic!(
-            "JsValue::from::<String>() is not supported in wry-bindgen - use JS bindings instead"
-        );
-    }
-}
-
-// TryFrom implementations for primitive types (used by BigInt conversions)
-macro_rules! impl_try_from_jsvalue {
-    ($($ty:ty),*) => {
-        $(
-            impl TryFrom<JsValue> for $ty {
-                type Error = JsValue;
-
-                fn try_from(_val: JsValue) -> Result<Self, Self::Error> {
-                    panic!("TryFrom<JsValue> for {} is not supported in wry-bindgen", stringify!($ty));
-                }
-            }
-        )*
-    };
-}
-
-impl_try_from_jsvalue!(i64, u64, i128, u128);
 
 // JsCast for Infallible (used as error type in TryFrom)
 impl AsRef<JsValue> for std::convert::Infallible {
@@ -523,7 +509,7 @@ impl From<std::convert::Infallible> for JsValue {
 
 impl crate::JsCast for std::convert::Infallible {
     fn instanceof(_val: &JsValue) -> bool {
-        false
+        true
     }
 
     fn unchecked_from_js(_val: JsValue) -> Self {

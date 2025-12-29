@@ -23,7 +23,8 @@ wasm-bindgen-macro = { package = "wry-bindgen-macro", path = "wry-bindgen-macro"
 lazy-js-bundle = { git = "https://github.com/DioxusLabs/dioxus" }
 
 [dev-dependencies]
-web-sys = { path = "wasm-bindgen/crates/web-sys", features = ['Document', 'Element', 'HtmlElement', 'Node', 'Window'] }
+web-sys = { path = "wasm-bindgen/crates/web-sys", features = ['CssStyleDeclaration', 'Document', 'Element', 'HtmlElement', 'Window'] }
+js-sys = { path = "wasm-bindgen/crates/js-sys" }
 
 [[test]]
 name = "main_thread_tests"

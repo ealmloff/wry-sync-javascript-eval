@@ -47,15 +47,6 @@ export function debug_string(x: any): string {
     return "[unrepresentable]";
   }
 }
-export function str_to_jsvalue(n: string): any {
-  return n;
-}
-export function float_to_jsvalue(n: number): any {
-  return n;
-}
-export function int_to_jsvalue(n: number): any {
-  return n;
-}
 
 // Arithmetic operators
 export function js_checked_div(a: any, b: any): any {
