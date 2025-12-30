@@ -336,3 +336,134 @@ pub(crate) fn test_jsvalue_js_in() {
     // 'baz' in obj should be false
     assert!(!baz_prop.js_in(&obj), "'baz' should not be in object");
 }
+
+pub(crate) fn test_instanceof_basic() {
+    use wasm_bindgen::JsCast;
+
+    // Test instanceof with built-in JS types
+    #[wasm_bindgen(inline_js = r#"
+        export function create_array() { return [1, 2, 3]; }
+        export function create_date() { return new Date(); }
+        export function create_error() { return new Error("test"); }
+        export function create_object() { return { foo: "bar" }; }
+        export function create_number() { return 42; }
+        export function create_string() { return "hello"; }
+    "#)]
+    extern "C" {
+        type Array;
+        type Date;
+        type Error;
+
+        fn create_array() -> JsValue;
+        fn create_date() -> JsValue;
+        fn create_error() -> JsValue;
+        fn create_object() -> JsValue;
+        fn create_number() -> JsValue;
+        fn create_string() -> JsValue;
+    }
+
+    // Array instanceof checks
+    let arr = create_array();
+    assert!(arr.has_type::<Array>(), "Array should be instanceof Array");
+    assert!(!arr.has_type::<Date>(), "Array should not be instanceof Date");
+    assert!(!arr.has_type::<Error>(), "Array should not be instanceof Error");
+
+    // Date instanceof checks
+    let date = create_date();
+    assert!(date.has_type::<Date>(), "Date should be instanceof Date");
+    assert!(!date.has_type::<Array>(), "Date should not be instanceof Array");
+
+    // Error instanceof checks
+    let error = create_error();
+    assert!(error.has_type::<Error>(), "Error should be instanceof Error");
+    assert!(!error.has_type::<Array>(), "Error should not be instanceof Array");
+
+    // Plain object should not be instanceof Array/Date/Error
+    let obj = create_object();
+    assert!(!obj.has_type::<Array>(), "Object should not be instanceof Array");
+    assert!(!obj.has_type::<Date>(), "Object should not be instanceof Date");
+    assert!(!obj.has_type::<Error>(), "Object should not be instanceof Error");
+
+    // Primitives should not be instanceof any class
+    let num = create_number();
+    assert!(!num.has_type::<Array>(), "Number should not be instanceof Array");
+
+    let str_val = create_string();
+    assert!(!str_val.has_type::<Array>(), "String should not be instanceof Array");
+}
+
+pub(crate) fn test_instanceof_is_instance_of() {
+    use wasm_bindgen::JsCast;
+
+    // Test is_instance_of method
+    #[wasm_bindgen(inline_js = r#"
+        export function make_array() { return []; }
+        export function make_object() { return {}; }
+    "#)]
+    extern "C" {
+        type Array;
+
+        fn make_array() -> JsValue;
+        fn make_object() -> JsValue;
+    }
+
+    let arr = make_array();
+    let obj = make_object();
+
+    // Test is_instance_of (same as has_type but different API)
+    assert!(arr.is_instance_of::<Array>(), "Array is_instance_of Array");
+    assert!(!obj.is_instance_of::<Array>(), "Object is not instance_of Array");
+}
+
+pub(crate) fn test_instanceof_dyn_into() {
+    use wasm_bindgen::JsCast;
+
+    // Test dyn_into for safe casting
+    #[wasm_bindgen(inline_js = r#"
+        export function get_array() { return [1, 2, 3]; }
+        export function get_object() { return { x: 1 }; }
+    "#)]
+    extern "C" {
+        #[derive(Debug)]
+        type Array;
+
+        fn get_array() -> JsValue;
+        fn get_object() -> JsValue;
+    }
+
+    // dyn_into should succeed for correct type
+    let arr_val = get_array();
+    let arr_result: Result<Array, _> = arr_val.dyn_into();
+    assert!(arr_result.is_ok(), "dyn_into should succeed for Array");
+
+    // dyn_into should fail for wrong type
+    let obj_val = get_object();
+    let obj_result: Result<Array, _> = obj_val.dyn_into();
+    assert!(obj_result.is_err(), "dyn_into should fail for non-Array");
+}
+
+pub(crate) fn test_instanceof_dyn_ref() {
+    use wasm_bindgen::JsCast;
+
+    // Test dyn_ref for safe reference casting
+    #[wasm_bindgen(inline_js = r#"
+        export function get_date() { return new Date(); }
+        export function get_number() { return 123; }
+    "#)]
+    extern "C" {
+        type Date;
+
+        fn get_date() -> JsValue;
+        fn get_number() -> JsValue;
+    }
+
+    // dyn_ref should return Some for correct type
+    let date_val = get_date();
+    let date_ref: Option<&Date> = date_val.dyn_ref();
+    assert!(date_ref.is_some(), "dyn_ref should return Some for Date");
+
+    // dyn_ref should return None for wrong type
+    let num_val = get_number();
+    let num_ref: Option<&Date> = num_val.dyn_ref();
+    assert!(num_ref.is_none(), "dyn_ref should return None for non-Date");
+}

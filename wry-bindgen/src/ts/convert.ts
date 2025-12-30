@@ -122,3 +122,8 @@ export function js_loose_eq(a: any, b: any): boolean {
 export function js_in(prop: any, obj: any): boolean {
   return prop in obj;
 }
+
+// instanceof check for Error
+export function is_error(x: any): boolean {
+  return x instanceof Error;
+}

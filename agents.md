@@ -6,3 +6,4 @@ I am developing a replacement for wasm bindgen in the wry-bindgen folder. Status
 - [x] Js-sys compiling with the new bindgen
 - [x] Basic roundtrip tests passing
 - [ ] Casting and type checking
+- [ ] Don't hardcode drop and clone implementations - use the macro

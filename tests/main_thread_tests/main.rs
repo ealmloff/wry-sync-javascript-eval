@@ -62,6 +62,12 @@ fn main() {
         test_with_js_context(jsvalue::test_jsvalue_loose_eq_coercion);
         test_with_js_context(jsvalue::test_jsvalue_js_in);
 
+        // instanceof tests
+        test_with_js_context(jsvalue::test_instanceof_basic);
+        test_with_js_context(jsvalue::test_instanceof_is_instance_of);
+        test_with_js_context(jsvalue::test_instanceof_dyn_into);
+        test_with_js_context(jsvalue::test_instanceof_dyn_ref);
+
         // String enum tests
         test_with_js_context(string_enum::test_string_enum_from_str);
         test_with_js_context(string_enum::test_string_enum_to_str);

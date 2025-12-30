@@ -250,11 +250,58 @@ fn generate_type(ty: &ImportType, krate: &TokenStream) -> syn::Result<TokenStrea
         }
     };
 
-    // Generate JsCast implementation
+    // Generate JsCast implementation with actual instanceof check
+    let js_name = &ty.js_name;
+
+    // Generate JavaScript instanceof check code with vendor prefix fallback
+    let instanceof_js_code = if ty.vendor_prefixes.is_empty() {
+        // Simple case: just check instanceof against the class name
+        format!("(a0) => a0 instanceof {}", js_name)
+    } else {
+        // Generate vendor-prefixed fallback:
+        // (a0) => a0 instanceof (typeof Foo !== 'undefined' ? Foo : (typeof webkitFoo !== 'undefined' ? webkitFoo : ...))
+        let mut class_expr = format!("(typeof {} !== 'undefined' ? {} : ", js_name, js_name);
+        for (i, prefix) in ty.vendor_prefixes.iter().enumerate() {
+            let prefixed = format!("{}{}", prefix, js_name);
+            if i == ty.vendor_prefixes.len() - 1 {
+                // Last prefix - use Object as final fallback (which will make instanceof return false for non-objects)
+                class_expr.push_str(&format!(
+                    "(typeof {} !== 'undefined' ? {} : Object)",
+                    prefixed, prefixed
+                ));
+            } else {
+                class_expr.push_str(&format!(
+                    "(typeof {} !== 'undefined' ? {} : ",
+                    prefixed, prefixed
+                ));
+            }
+        }
+        // Close all the parentheses
+        class_expr.push(')');
+        format!("(a0) => a0 instanceof {}", class_expr)
+    };
+
+    let instanceof_registry_name = format!("{}::__instanceof", rust_name);
+
     let jscast_impl = quote_spanned! {span=>
         impl #krate::JsCast for #rust_name {
-            fn instanceof(_: &#krate::JsValue) -> bool {
-                true
+            fn instanceof(__val: &#krate::JsValue) -> bool {
+                static __INSTANCEOF_SPEC: #krate::JsFunctionSpec = #krate::JsFunctionSpec::new(
+                    || #krate::alloc::format!(#instanceof_js_code),
+                );
+
+                #krate::inventory::submit! {
+                    __INSTANCEOF_SPEC
+                }
+
+                // Look up the instanceof check function at runtime
+                let __func: #krate::JSFunction<fn(&#krate::JsValue) -> bool> =
+                    #krate::FUNCTION_REGISTRY
+                        .get_function(__INSTANCEOF_SPEC)
+                        .expect(concat!("Function not found: ", #instanceof_registry_name));
+
+                // Call the function
+                __func.call(__val)
             }
 
             fn unchecked_from_js(val: #krate::JsValue) -> Self {

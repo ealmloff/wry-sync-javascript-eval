@@ -284,9 +284,8 @@ impl core::fmt::Display for JsError {
 impl core::error::Error for JsError {}
 
 impl JsCast for JsError {
-    fn instanceof(_val: &JsValue) -> bool {
-        // Check if value is an Error - would need JS call
-        true
+    fn instanceof(val: &JsValue) -> bool {
+        crate::js_helpers::js_is_error(val)
     }
 
     fn unchecked_from_js(val: JsValue) -> Self {

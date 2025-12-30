@@ -121,4 +121,8 @@ extern "C" {
     // Other operators
     #[wasm_bindgen(js_name = "js_in")]
     pub(crate) fn js_in(prop: &JsValue, obj: &JsValue) -> bool;
+
+    // instanceof check for Error
+    #[wasm_bindgen(js_name = "is_error")]
+    pub(crate) fn js_is_error(x: &JsValue) -> bool;
 }
