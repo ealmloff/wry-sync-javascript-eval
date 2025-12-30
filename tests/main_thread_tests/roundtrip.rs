@@ -36,4 +36,7 @@ pub(crate) fn test_roundtrip() {
     roundtrip!(bool, false);
     roundtrip!(Option<u32>, Some(100u32));
     roundtrip!(Option<u32>, None);
+    roundtrip!(Vec<u32>, vec![1u32, 2u32, 3u32, 4u32, 5u32]);
+    roundtrip!(Vec<f32>, vec![1f32, 2f32, 3f32, 4f32, 5f32]);
+    roundtrip!(Option<Vec<f32>>, Some(vec![1f32, 2f32, 3f32, 4f32, 5f32]));
 }

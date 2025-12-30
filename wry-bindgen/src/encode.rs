@@ -1018,6 +1018,27 @@ impl<T: BinaryEncode> BinaryEncode for Vec<T> {
     }
 }
 
+impl<T: BinaryDecode> BinaryDecode for Vec<T> {
+    fn decode(decoder: &mut DecodedData) -> Result<Self, DecodeError> {
+        let len = decoder.take_u32()? as usize;
+        let mut vec = Vec::with_capacity(len);
+        for _ in 0..len {
+            vec.push(T::decode(decoder)?);
+        }
+        Ok(vec)
+    }
+}
+
+impl<T: BinaryDecode> BatchableResult for Vec<T> {
+    fn needs_flush() -> bool {
+        true
+    }
+
+    fn batched_placeholder(_batch: &mut BatchState) -> Self {
+        unreachable!("needs_flush types should never call batched_placeholder")
+    }
+}
+
 impl<T> BinaryEncode for &[T]
 where
     for<'a> &'a T: BinaryEncode,
