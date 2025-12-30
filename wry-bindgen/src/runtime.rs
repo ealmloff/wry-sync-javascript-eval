@@ -3,8 +3,11 @@
 //! This module handles the connection between the Rust runtime and the
 //! JavaScript environment via winit's event loop.
 
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+use once_cell::sync::OnceCell;
+use spin::RwLock;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{OnceLock, RwLock};
 
 use slotmap::{DefaultKey, KeyData};
 
@@ -58,26 +61,26 @@ impl WryRuntime {
 
     /// Queue a Rust call from JavaScript.
     pub fn queue_rust_call(&self, responder: IPCMessage) {
-        if let Some(sender) = self.sender.read().unwrap().as_ref() {
+        if let Some(sender) = self.sender.read().as_ref() {
             let _ = sender.send(responder);
         } else {
-            self.queued_rust_calls.write().unwrap().push(responder);
+            self.queued_rust_calls.write().push(responder);
         }
     }
 
     /// Set the sender for Rust calls and flush any queued calls.
     pub fn set_sender(&self, sender: Sender<IPCMessage>) {
-        let mut queued = self.queued_rust_calls.write().unwrap();
-        *self.sender.write().unwrap() = Some(sender);
+        let mut queued = self.queued_rust_calls.write();
+        *self.sender.write() = Some(sender);
         for call in queued.drain(..) {
-            if let Some(sender) = self.sender.read().unwrap().as_ref() {
+            if let Some(sender) = self.sender.read().as_ref() {
                 let _ = sender.send(call);
             }
         }
     }
 }
 
-static RUNTIME: OnceLock<WryRuntime> = OnceLock::new();
+static RUNTIME: OnceCell<WryRuntime> = OnceCell::new();
 
 /// Set the event loop proxy for the runtime.
 ///

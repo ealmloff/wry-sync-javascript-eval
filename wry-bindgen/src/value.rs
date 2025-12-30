@@ -3,7 +3,8 @@
 //! This type represents a reference to a JavaScript value on the JS heap.
 //! API compatible with wasm-bindgen's JsValue.
 
-use std::fmt;
+use alloc::string::String;
+use core::fmt;
 
 use crate::function::JSFunction;
 
@@ -79,8 +80,32 @@ impl JsValue {
     /// Get the heap ID for this value.
     ///
     /// This is used internally for encoding values to send to JS.
-    pub(crate) fn id(&self) -> u64 {
+    #[inline]
+    pub fn id(&self) -> u64 {
         self.idx
+    }
+
+    /// Returns the value as f64 without type checking.
+    /// Used by serde-wasm-bindgen for numeric conversions.
+    #[inline]
+    pub fn unchecked_into_f64(&self) -> f64 {
+        self.as_f64().unwrap_or(f64::NAN)
+    }
+
+    /// Check if this value is an instance of a specific JS type.
+    #[inline]
+    pub fn has_type<T: crate::JsCast>(&self) -> bool {
+        T::instanceof(self)
+    }
+
+    /// Get the internal ABI representation (heap index), consuming self.
+    /// This is used by the convert module for low-level interop.
+    /// Returns u32 for wasm-bindgen compatibility.
+    #[inline]
+    pub fn into_abi(self) -> u32 {
+        let id = self.idx;
+        core::mem::forget(self);
+        id as u32
     }
 
     /// Creates a new JS value representing `undefined`.
@@ -103,12 +128,12 @@ impl JsValue {
 
     /// Creates a JS string from a Rust string.
     pub fn from_str(s: &str) -> JsValue {
-        s.into()
+        s.try_into().unwrap()
     }
 
     /// Creates a JS number from an f64.
     pub fn from_f64(n: f64) -> JsValue {
-        n.into()
+        n.try_into().unwrap()
     }
 }
 
@@ -189,8 +214,8 @@ impl PartialEq for JsValue {
 
 impl Eq for JsValue {}
 
-impl std::hash::Hash for JsValue {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl core::hash::Hash for JsValue {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.idx.hash(state);
     }
 }
@@ -400,7 +425,7 @@ impl JsValue {
 }
 
 // Operator trait implementations for JsValue references
-use std::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Neg, Not, Rem, Shl, Shr, Sub};
+use core::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Neg, Not, Rem, Shl, Shr, Sub};
 
 impl Neg for &JsValue {
     type Output = JsValue;
@@ -493,19 +518,19 @@ impl From<bool> for JsValue {
 }
 
 // JsCast for Infallible (used as error type in TryFrom)
-impl AsRef<JsValue> for std::convert::Infallible {
+impl AsRef<JsValue> for core::convert::Infallible {
     fn as_ref(&self) -> &JsValue {
         match *self {}
     }
 }
 
-impl From<std::convert::Infallible> for JsValue {
-    fn from(val: std::convert::Infallible) -> Self {
+impl From<core::convert::Infallible> for JsValue {
+    fn from(val: core::convert::Infallible) -> Self {
         match val {}
     }
 }
 
-impl crate::JsCast for std::convert::Infallible {
+impl crate::JsCast for core::convert::Infallible {
     fn instanceof(_val: &JsValue) -> bool {
         true
     }

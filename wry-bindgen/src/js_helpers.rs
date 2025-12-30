@@ -1,5 +1,7 @@
 //! Javascript methods defined for use in JsValue methods
 
+use alloc::string::String;
+
 use crate::JsValue;
 use crate::wasm_bindgen;
 

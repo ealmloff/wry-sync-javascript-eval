@@ -3,7 +3,8 @@
 //! This module provides the batching infrastructure that allows multiple
 //! JS operations to be grouped together for efficient execution.
 
-use std::cell::RefCell;
+use core::cell::RefCell;
+use alloc::vec::Vec;
 
 use crate::encode::{BatchableResult, BinaryDecode};
 use crate::function::JSFunction;
@@ -109,7 +110,7 @@ impl BatchState {
     }
 
     pub(crate) fn take_encoder(&mut self) -> EncodedData {
-        std::mem::replace(&mut self.encoder, Self::new_encoder_for_evaluate())
+        core::mem::replace(&mut self.encoder, Self::new_encoder_for_evaluate())
     }
 
     pub(crate) fn extend_encoder(&mut self, other: &EncodedData) {
@@ -182,7 +183,7 @@ pub(crate) fn run_js_sync<R: BatchableResult>(
 
         BATCH_STATE.with(|state| {
             let mut state = state.borrow_mut();
-            let encoded_during_op = std::mem::replace(&mut state.encoder, batch);
+            let encoded_during_op = core::mem::replace(&mut state.encoder, batch);
             state.extend_encoder(&encoded_during_op);
         });
 

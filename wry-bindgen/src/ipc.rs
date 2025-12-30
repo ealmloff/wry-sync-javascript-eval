@@ -7,8 +7,10 @@
 //! - u8 buffer: from u8_offset to str_offset
 //! - string buffer: from str_offset to end
 
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 use base64::Engine;
-use std::fmt;
+use core::fmt;
 
 /// Error type for decoding binary IPC messages.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,7 +83,7 @@ impl fmt::Display for DecodeError {
     }
 }
 
-impl std::error::Error for DecodeError {}
+impl core::error::Error for DecodeError {}
 
 /// Message type identifier for IPC protocol.
 #[repr(u8)]
@@ -278,7 +280,7 @@ impl<'a> DecodedData<'a> {
                 actual: actual_len,
             });
         };
-        let s = std::str::from_utf8(buf).map_err(|e| DecodeError::InvalidUtf8 {
+        let s = core::str::from_utf8(buf).map_err(|e| DecodeError::InvalidUtf8 {
             position: e.valid_up_to(),
         })?;
         self.str_buf = rem;

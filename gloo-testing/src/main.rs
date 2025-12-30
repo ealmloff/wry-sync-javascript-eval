@@ -5,6 +5,14 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 
 pub fn main() {
+    wry_testing::run(|| {
+        app();
+        wait_for_js_result::<i32>();
+    })
+    .unwrap();
+}
+
+fn app() {
     console_error_panic_hook::set_once();
 
     let document = web_sys::window().unwrap_throw().document().unwrap_throw();

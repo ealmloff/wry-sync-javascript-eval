@@ -11,9 +11,11 @@ std = []
 base64 = "0.22"
 bytemuck = "1.14"
 inventory = "0.3.21"
-once_cell = "1.19"
 slotmap = { version = "1.0" }
 wry-bindgen-macro = { path = "../wry-bindgen-macro" }
+# We use this instead of std because wasm bindgen supports no_std environments
+once_cell = { version = "1.21.3", features = ["critical-section"] }
+spin = "0.10.0"
 
 [build-dependencies]
 lazy-js-bundle = { git = "https://github.com/DioxusLabs/dioxus" }

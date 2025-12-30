@@ -113,7 +113,7 @@ fn generate_type(ty: &ImportType, krate: &TokenStream) -> syn::Result<TokenStrea
 
     // Generate AsRef<JsValue> implementation
     let as_ref_impl = quote_spanned! {span=>
-        impl AsRef<#krate::JsValue> for #rust_name {
+        impl ::core::convert::AsRef<#krate::JsValue> for #rust_name {
             fn as_ref(&self) -> &#krate::JsValue {
                 &self.obj
             }
@@ -134,19 +134,19 @@ fn generate_type(ty: &ImportType, krate: &TokenStream) -> syn::Result<TokenStrea
 
     // Generate From<Type> for JsValue and From<JsValue> for Type
     let into_jsvalue = quote_spanned! {span=>
-        impl From<#rust_name> for #krate::JsValue {
+        impl ::core::convert::From<#rust_name> for #krate::JsValue {
             fn from(val: #rust_name) -> Self {
                 val.obj
             }
         }
 
-        impl From<&#rust_name> for #krate::JsValue {
+        impl ::core::convert::From<&#rust_name> for #krate::JsValue {
             fn from(val: &#rust_name) -> Self {
-                val.obj.clone()
+                ::core::clone::Clone::clone(&val.obj)
             }
         }
 
-        impl From<#krate::JsValue> for #rust_name {
+        impl ::core::convert::From<#krate::JsValue> for #rust_name {
             fn from(val: #krate::JsValue) -> Self {
                 Self { obj: val }
             }
@@ -172,24 +172,32 @@ fn generate_type(ty: &ImportType, krate: &TokenStream) -> syn::Result<TokenStrea
 
     // Generate From and AsRef impls for parent types
     let mut from_parents = TokenStream::new();
+    from_parents.extend(quote_spanned! {span=>
+        impl ::core::convert::AsRef<#rust_name> for #rust_name {
+            #[inline]
+            fn as_ref(&self) -> &#rust_name {
+                self
+            }
+        }
+    });
     for parent in &ty.extends {
         from_parents.extend(quote_spanned! {span=>
-            impl From<#rust_name> for #parent {
+            impl ::core::convert::From<#rust_name> for #parent {
                 fn from(val: #rust_name) -> #parent {
                     #parent { obj: val.obj }
                 }
             }
 
-            impl From<&#rust_name> for #parent {
+            impl ::core::convert::From<&#rust_name> for #parent {
                 fn from(val: &#rust_name) -> #parent {
-                    #parent { obj: val.obj.clone() }
+                    #parent { obj: ::core::clone::Clone::clone(&val.obj) }
                 }
             }
 
-            impl AsRef<#parent> for #rust_name {
+            impl ::core::convert::AsRef<#parent> for #rust_name {
                 #[inline]
                 fn as_ref(&self) -> &#parent {
-                    #parent::unchecked_from_js_ref(self.as_ref())
+                    #parent::unchecked_from_js_ref(::core::convert::AsRef::as_ref(self))
                 }
             }
         });
@@ -223,8 +231,8 @@ fn generate_type(ty: &ImportType, krate: &TokenStream) -> syn::Result<TokenStrea
     // Generate BinaryDecode implementation
     let binary_decode_impl = quote_spanned! {span=>
         impl #krate::BinaryDecode for #rust_name {
-            fn decode(decoder: &mut #krate::DecodedData) -> Result<Self, #krate::DecodeError> {
-                #krate::JsValue::decode(decoder).map(|v| Self { obj: v })
+            fn decode(decoder: &mut #krate::DecodedData) -> ::core::result::Result<Self, #krate::DecodeError> {
+                ::core::result::Result::map(#krate::JsValue::decode(decoder), |v| Self { obj: v })
             }
         }
     };
@@ -245,7 +253,7 @@ fn generate_type(ty: &ImportType, krate: &TokenStream) -> syn::Result<TokenStrea
     // Generate JsCast implementation
     let jscast_impl = quote_spanned! {span=>
         impl #krate::JsCast for #rust_name {
-            fn instanceof(val: &#krate::JsValue) -> bool {
+            fn instanceof(_: &#krate::JsValue) -> bool {
                 true
             }
 
@@ -324,7 +332,7 @@ fn generate_function(
     // Generate the function body
     let func_body = quote_spanned! {span=>
         static __SPEC: #krate::JsFunctionSpec = #krate::JsFunctionSpec::new(
-            || format!(#js_code_str),
+            || #krate::alloc::format!(#js_code_str),
         );
 
         #krate::inventory::submit! {
@@ -662,7 +670,7 @@ fn generate_static(st: &ImportStatic, krate: &TokenStream) -> syn::Result<TokenS
     Ok(quote_spanned! {span=>
         #vis static #rust_name: #krate::JsThreadLocal<#ty> = {
             static __SPEC: #krate::JsFunctionSpec = #krate::JsFunctionSpec::new(
-                || format!(#js_code),
+                || #krate::alloc::format!(#js_code),
             );
 
             #krate::inventory::submit! {
@@ -738,10 +746,10 @@ fn generate_string_enum(string_enum: &StringEnum, krate: &TokenStream) -> syn::R
         #[automatically_derived]
         impl #enum_name {
             /// Convert a string to this enum variant.
-            pub fn from_str(s: &str) -> Option<#enum_name> {
+            pub fn from_str(s: &str) -> ::core::option::Option<#enum_name> {
                 match s {
-                    #(#variant_values => Some(#variant_paths),)*
-                    _ => None,
+                    #(#variant_values => ::core::option::Option::Some(#variant_paths),)*
+                    _ => ::core::option::Option::None,
                 }
             }
 
@@ -749,13 +757,13 @@ fn generate_string_enum(string_enum: &StringEnum, krate: &TokenStream) -> syn::R
             pub fn to_str(&self) -> &'static str {
                 match self {
                     #(#variant_paths => #variant_values,)*
-                    #enum_name::__Invalid => panic!(#invalid_to_str_msg),
+                    #enum_name::__Invalid => ::core::panic!(#invalid_to_str_msg),
                 }
             }
 
             /// Convert a JsValue (if it's a string) to this enum variant.
-            #vis fn from_js_value(obj: &#krate::JsValue) -> Option<#enum_name> {
-                obj.as_string().and_then(|s| Self::from_str(&s))
+            #vis fn from_js_value(obj: &#krate::JsValue) -> ::core::option::Option<#enum_name> {
+                ::core::option::Option::and_then(obj.as_string(), |s| Self::from_str(&s))
             }
         }
     };
@@ -783,11 +791,11 @@ fn generate_string_enum(string_enum: &StringEnum, krate: &TokenStream) -> syn::R
     // Generate BinaryDecode implementation - decode u32 to variant
     let binary_decode_impl = quote! {
         impl #krate::BinaryDecode for #enum_name {
-            fn decode(decoder: &mut #krate::DecodedData) -> Result<Self, #krate::DecodeError> {
+            fn decode(decoder: &mut #krate::DecodedData) -> ::core::result::Result<Self, #krate::DecodeError> {
                 let discriminant = decoder.take_u32()?;
                 match discriminant {
-                    #(#variant_indices => Ok(#variant_paths),)*
-                    _ => Ok(#enum_name::__Invalid),
+                    #(#variant_indices => ::core::result::Result::Ok(#variant_paths),)*
+                    _ => ::core::result::Result::Ok(#enum_name::__Invalid),
                 }
             }
         }
@@ -801,7 +809,7 @@ fn generate_string_enum(string_enum: &StringEnum, krate: &TokenStream) -> syn::R
             }
 
             fn batched_placeholder(_batch: &mut #krate::batch::BatchState) -> Self {
-                unreachable!("needs_flush types should never call batched_placeholder")
+                ::core::unreachable!("needs_flush types should never call batched_placeholder")
             }
         }
     };
@@ -809,7 +817,7 @@ fn generate_string_enum(string_enum: &StringEnum, krate: &TokenStream) -> syn::R
     // Generate From<EnumName> for JsValue
     let into_jsvalue_impl = quote! {
         #[automatically_derived]
-        impl From<#enum_name> for #krate::JsValue {
+        impl ::core::convert::From<#enum_name> for #krate::JsValue {
             fn from(val: #enum_name) -> Self {
                 #krate::JsValue::from_str(val.to_str())
             }

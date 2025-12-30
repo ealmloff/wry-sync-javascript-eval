@@ -3,10 +3,12 @@
 //! This module provides types for calling JavaScript functions from Rust
 //! and for registering Rust callbacks that can be called from JavaScript.
 
-use std::any::Any;
-use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
-use std::marker::PhantomData;
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+use core::any::Any;
+use core::cell::{Cell, RefCell};
+use core::marker::PhantomData;
+use alloc::collections::BTreeMap;
 
 use slotmap::{DefaultKey, SlotMap};
 
@@ -21,7 +23,7 @@ pub const DROP_NATIVE_REF_FN_ID: u32 = 0xFFFFFFFF;
 
 thread_local! {
     /// Cache mapping type definition bytes to the assigned type_id for the JS side
-    static TYPE_CACHE: RefCell<HashMap<Vec<u8>, u32>> = RefCell::new(HashMap::new());
+    static TYPE_CACHE: RefCell<BTreeMap<Vec<u8>, u32>> = RefCell::new(BTreeMap::new());
     /// Next type ID to assign
     static NEXT_TYPE_ID: Cell<u32> = Cell::new(0);
 }
