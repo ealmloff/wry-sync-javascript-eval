@@ -51,27 +51,21 @@ pub trait IntoClosure<M> {
 /// The marker type parameter `M` disambiguates between:
 /// - `DecodeArg<Owned>` for owned types that implement BinaryDecode
 /// - `DecodeArg<Borrowed>` for borrowed references to JsCast types
-pub trait DecodeArg<M = Owned> {
+pub trait DecodeArg<'a, M = Owned> {
     /// The storage type used to hold the decoded value.
     type Storage: Sized;
-
-    /// The argument type passed to the callback, potentially borrowing from Storage.
-    type Arg<'s>
-    where
-        Self::Storage: 's;
 
     /// Decode the storage from binary data.
     fn decode(decoder: &mut DecodedData) -> Result<Self::Storage, DecodeError>;
 
     /// Convert storage to the argument type.
-    fn as_arg(storage: &Self::Storage) -> Self::Arg<'_>;
+    fn as_arg(storage: &'a Self::Storage) -> Self;
 }
 
 /// Implementation for owned types that implement BinaryDecode.
 /// The trait is implemented for `T` to decode owned values.
-impl<T: BinaryDecode + Clone> DecodeArg<Owned> for T {
+impl<'a, T: BinaryDecode + Clone> DecodeArg<'a, Owned> for T {
     type Storage = T;
-    type Arg<'s> = T where T: 's;
 
     fn decode(decoder: &mut DecodedData) -> Result<T, DecodeError> {
         T::decode(decoder)
@@ -84,15 +78,14 @@ impl<T: BinaryDecode + Clone> DecodeArg<Owned> for T {
 
 /// Implementation for borrowed references to JsCast types.
 /// Note: We implement for `T`, and use the GAT to express the reference type.
-impl<T: crate::JsCast + 'static> DecodeArg<Borrowed> for T {
+impl<'a, T: crate::JsCast + 'static> DecodeArg<'a, Borrowed> for &'a T {
     type Storage = JsValue;
-    type Arg<'s> = &'s T where JsValue: 's;
 
     fn decode(decoder: &mut DecodedData) -> Result<JsValue, DecodeError> {
         <JsValue as BinaryDecode>::decode(decoder)
     }
 
-    fn as_arg(storage: &JsValue) -> &T {
+    fn as_arg(storage: &'a JsValue) -> &'a T {
         storage.unchecked_ref::<T>()
     }
 }
@@ -730,22 +723,19 @@ impl<T: ?Sized> EncodeTypeDef for CallbackKey<T> {
 /// The body can use the type names as variables containing the decoded arguments.
 macro_rules! decode_args {
     // Main entry: decode storage for all args, then convert and call body
-    ($decoder:expr; [$(($ty:ident, $marker:ident)),*] => $body:expr) => {{
-        // Decode all arguments into storage (using unique variable names)
-        $(
-            #[allow(non_snake_case)]
-            let $ty = <$ty as DecodeArg<$marker>>::decode($decoder).unwrap();
-        )*
-        // Convert storage to arg types and execute body
-        // The as_arg call creates references that live for this scope
+    ($decoder:expr; [($first:ident, $first_marker:ident), $(($ty:ident, $marker:ident),)*] => $body:expr) => {{
+        // Decode this argument into storage (using unique variable names)
         #[allow(non_snake_case)]
+        let $first = <$first as DecodeArg<$first_marker>>::decode($decoder).unwrap();
         {
-            $(
-                #[allow(non_snake_case)]
-                let $ty = <$ty as DecodeArg<$marker>>::as_arg(&$ty);
-            )*
-            $body
+            let $first = <$first as DecodeArg<$first_marker>>::as_arg(&$first);
+            // Recurse to decode remaining arguments
+            decode_args!($decoder; [$(($ty, $marker),)*] => $body);
         }
+    }};
+    // Nothing to decode, just execute body
+    ($decoder:expr; [] => $body:expr) => {{
+        $body
     }};
 }
 
@@ -753,9 +743,9 @@ macro_rules! impl_fnmut_stub {
     // Match pairs of (arg, marker)
     ($(($arg:ident, $marker:ident)),*) => {
         // Implement WasmClosure trait for dyn FnMut variants
-        impl<R, $($arg,)* $($marker,)*> crate::WasmClosure<(fn($($arg),*) -> R, $($marker,)*)> for dyn for<'a> FnMut($(<$arg as DecodeArg<$marker>>::Arg<'a>),*) -> R
+        impl<R, $($arg,)* $($marker,)*> crate::WasmClosure<(fn($($arg),*) -> R, $($marker,)*)> for dyn for<'a> FnMut($($arg),*) -> R
             where
-            $($arg: DecodeArg<$marker> + EncodeTypeDef + 'static, )*
+            $($arg: for<'a> DecodeArg<'a, $marker> + EncodeTypeDef + 'static, )*
             $($marker: 'static, )*
             R: BinaryEncode + EncodeTypeDef + 'static,
         {
@@ -765,7 +755,7 @@ macro_rules! impl_fnmut_stub {
                 let key = register_value(RustCallback::new(
                     move |decoder: &mut DecodedData, encoder: &mut EncodedData| {
                         // Decode arguments and call the closure
-                        let _ = decode_args!(decoder; [$(($arg, $marker)),*] => {
+                        let _ = decode_args!(decoder; [$(($arg, $marker),)*] => {
                             let result = boxed($($arg),*);
                             result.encode(encoder);
                         });
@@ -780,9 +770,9 @@ macro_rules! impl_fnmut_stub {
         }
 
         // Implement WasmClosure trait for dyn Fn variants (immutable closures)
-        impl<R, $($arg,)* $($marker,)*> crate::WasmClosure<(fn($($arg),*) -> R, $($marker,)*)> for dyn for<'a> Fn($(<$arg as DecodeArg<$marker>>::Arg<'a>),*) -> R
+        impl<R, $($arg,)* $($marker,)*> crate::WasmClosure<(fn($($arg),*) -> R, $($marker,)*)> for dyn for<'a> Fn($($arg),*) -> R
             where
-            $($arg: DecodeArg<$marker> + EncodeTypeDef + 'static, )*
+            $($arg: for<'a> DecodeArg<'a, $marker> + EncodeTypeDef + 'static, )*
             $($marker: 'static, )*
             R: BinaryEncode + EncodeTypeDef + 'static,
         {
@@ -792,7 +782,7 @@ macro_rules! impl_fnmut_stub {
                 let key = register_value(RustCallback::new(
                     move |decoder: &mut DecodedData, encoder: &mut EncodedData| {
                         // Decode arguments and call the closure
-                        let _ = decode_args!(decoder; [$(($arg, $marker)),*] => {
+                        let _ = decode_args!(decoder; [$(($arg, $marker),)*] => {
                             let result = boxed($($arg),*);
                             result.encode(encoder);
                         });
@@ -805,12 +795,12 @@ macro_rules! impl_fnmut_stub {
         }
 
         impl<R, F, $($arg,)* $($marker,)*> IntoClosure<(fn($($arg),*) -> R, $($marker,)*)> for F
-            where F: for<'a> FnMut($(<$arg as DecodeArg<$marker>>::Arg<'a>),*) -> R + 'static,
-            $($arg: DecodeArg<$marker> + EncodeTypeDef + 'static, )*
+            where F: for<'a> FnMut($($arg),*) -> R + 'static,
+            $($arg: for<'a> DecodeArg<'a, $marker> + EncodeTypeDef + 'static, )*
             $($marker: 'static, )*
             R: BinaryEncode + EncodeTypeDef + 'static,
         {
-            type Output = crate::Closure<dyn for<'a> FnMut($(<$arg as DecodeArg<$marker>>::Arg<'a>),*) -> R>;
+            type Output = crate::Closure<dyn for<'a> FnMut($($arg),*) -> R>;
 
             #[allow(non_snake_case)]
             #[allow(unused)]
@@ -818,7 +808,7 @@ macro_rules! impl_fnmut_stub {
                 let key = register_value(RustCallback::new(
                     move |decoder: &mut DecodedData, encoder: &mut EncodedData| {
                         // Decode arguments and call the closure
-                        let _ = decode_args!(decoder; [$(($arg, $marker)),*] => {
+                        let _ = decode_args!(decoder; [$(($arg, $marker),)*] => {
                             let result = self($($arg),*);
                             result.encode(encoder);
                         });
@@ -1158,29 +1148,29 @@ impl_fnmut_stub!(
 /// This wraps an FnOnce in an FnMut that panics if called more than once.
 macro_rules! impl_fn_once {
     ($(($arg:ident, $marker:ident)),*) => {
-        impl<R, F, $($arg,)* $($marker,)*> WasmClosureFnOnce<dyn for<'a> FnMut($(<$arg as DecodeArg<$marker>>::Arg<'a>),*) -> R, (fn($($arg),*) -> R, $($marker,)*)> for F
+        impl<R, F, $($arg,)* $($marker,)*> WasmClosureFnOnce<dyn for<'a> FnMut($($arg),*) -> R, (fn($($arg),*) -> R, $($marker,)*)> for F
         where
-            F: for<'a> FnOnce($(<$arg as DecodeArg<$marker>>::Arg<'a>),*) -> R + 'static,
-            $($arg: DecodeArg<$marker> + EncodeTypeDef + 'static,)*
+            F: for<'a> FnOnce($($arg),*) -> R + 'static,
+            $($arg: for<'a> DecodeArg<'a, $marker> + EncodeTypeDef + 'static,)*
             $($marker: 'static,)*
             R: BinaryEncode + EncodeTypeDef + 'static,
         {
             #[allow(non_snake_case)]
             #[allow(unused_variables)]
-            fn into_closure(self) -> Closure<dyn for<'a> FnMut($(<$arg as DecodeArg<$marker>>::Arg<'a>),*) -> R> {
+            fn into_closure(self) -> Closure<dyn for<'a> FnMut($($arg),*) -> R> {
                 // Use Option to allow taking the FnOnce
                 let mut me = Some(self);
                 // Register the callback using the same pattern as impl_fnmut_stub
                 let key = register_value(RustCallback::new(
                     move |decoder: &mut DecodedData, encoder: &mut EncodedData| {
                         let f = me.take().expect("FnOnce closure called more than once");
-                        decode_args!(decoder; [$(($arg, $marker)),*] => {
+                        decode_args!(decoder; [$(($arg, $marker),)*] => {
                             let result = f($($arg),*);
                             result.encode(encoder);
                         });
                     },
                 ));
-                $crate::__rt::wbg_cast::<CallbackKey<Closure<dyn for<'a> FnMut($(<$arg as DecodeArg<$marker>>::Arg<'a>),*) -> R>>, Closure<dyn for<'a> FnMut($(<$arg as DecodeArg<$marker>>::Arg<'a>),*) -> R>>(
+                $crate::__rt::wbg_cast::<CallbackKey<Closure<dyn for<'a> FnMut($($arg),*) -> R>>, Closure<dyn for<'a> FnMut($($arg),*) -> R>>(
                     CallbackKey(key.data().as_ffi(), PhantomData)
                 )
             }
