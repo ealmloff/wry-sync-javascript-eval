@@ -340,13 +340,13 @@ fn generate_function(
         }
 
         // Look up the function at runtime
-        let func: #krate::JSFunction<fn(#fn_types) -> #ret_type> =
+        let __func: #krate::JSFunction<fn(#fn_types) -> #ret_type> =
             #krate::FUNCTION_REGISTRY
                 .get_function(__SPEC)
                 .expect(concat!("Function not found: ", #registry_name));
 
         // Call the function
-        func.call(#call_values)
+        __func.call(#call_values)
     };
 
     // Get the rust attributes to forward (like #[cfg(...)] and #[doc = "..."])
@@ -677,17 +677,17 @@ fn generate_static(st: &ImportStatic, krate: &TokenStream) -> syn::Result<TokenS
                 __SPEC
             }
 
-            fn init() -> #ty {
+            fn __init() -> #ty {
                 // Look up the accessor function at runtime
-                let func: #krate::JSFunction<fn() -> #ty> =
+                let __func: #krate::JSFunction<fn() -> #ty> =
                     #krate::FUNCTION_REGISTRY
                         .get_function(__SPEC)
                         .expect(concat!("Static accessor not found: ", #registry_name));
 
                 // Call the accessor to get the value
-                func.call()
+                __func.call()
             }
-            #krate::__wry_bindgen_thread_local!(#ty = init())
+            #krate::__wry_bindgen_thread_local!(#ty = __init())
         };
     })
 }
