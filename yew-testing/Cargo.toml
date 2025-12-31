@@ -1,0 +1,8 @@
+[package]
+name = "yew-testing"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+wry-testing = { version = "0.1.0", path = ".." }
+yew = { version = "0.22.0", features = ["csr"] }

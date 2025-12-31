@@ -6,6 +6,7 @@ edition = "2024"
 [features]
 default = ["std"]
 std = []
+enable-interning = []
 
 [dependencies]
 base64 = "0.22"

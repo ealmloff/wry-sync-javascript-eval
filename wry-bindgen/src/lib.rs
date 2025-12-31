@@ -33,6 +33,9 @@ mod lazy;
 pub mod object_store;
 pub mod runtime;
 mod value;
+mod intern;
+
+pub use intern::*;
 
 /// Re-export of the Closure type for wasm-bindgen API compatibility.
 /// Allows `use wasm_bindgen::closure::Closure;`
@@ -315,6 +318,18 @@ impl JsError {
 impl From<JsError> for JsValue {
     fn from(e: JsError) -> Self {
         e.value
+    }
+}
+
+impl<T> From<Option<T>> for JsValue
+where
+    T: Into<JsValue>,
+{
+    fn from(s: Option<T>) -> JsValue {
+        match s {
+            Some(s) => s.into(),
+            None => JsValue::undefined(),
+        }
     }
 }
 
