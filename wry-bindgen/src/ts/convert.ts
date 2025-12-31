@@ -129,9 +129,9 @@ export function is_error(x: any): boolean {
 }
 
 // Heap management - clone a value in the JS heap
-export function clone_heap_ref(heapId: number): number {
-  const value = window.jsHeap.get(heapId);
-  return window.jsHeap.insert(value);
+// Returns the value itself (not the ID) - HeapRefType.encode handles inserting it
+export function clone_heap_ref(heapId: number): unknown {
+  return window.jsHeap.get(heapId);
 }
 
 // Heap management - drop a value from the JS heap
