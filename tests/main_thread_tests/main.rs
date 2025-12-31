@@ -20,12 +20,18 @@ extern "C" {
     pub fn heap_objects_alive() -> u32;
 }
 
-fn test_with_js_context<F: FnOnce()>(f: F) {
+fn test_with_js_context_allow_new_js_values<F: FnOnce()>(f: F) {
     println!("testing {}", std::any::type_name::<F>());
-    let before = heap_objects_alive();
     f();
-    let after = heap_objects_alive();
-    assert_eq!(before, after, "JS heap object leak detected");
+}
+
+fn test_with_js_context<F: FnOnce()>(f: F) {
+    test_with_js_context_allow_new_js_values(|| {
+        let before = heap_objects_alive();
+        f();
+        let after = heap_objects_alive();
+        assert_eq!(before, after, "JS heap object leak detected");
+    });
 }
 
 fn main() {
@@ -99,7 +105,7 @@ fn main() {
 
         // Thread local tests
         test_with_js_context(thread_local::test_thread_local);
-        test_with_js_context(thread_local::test_thread_local_window);
+        test_with_js_context_allow_new_js_values(thread_local::test_thread_local_window);
     })
     .unwrap();
 }
