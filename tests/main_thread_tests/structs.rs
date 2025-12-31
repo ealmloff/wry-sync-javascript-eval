@@ -4,11 +4,15 @@ use wasm_bindgen::prelude::*;
     for (let i = 0; i < 5; i++)
         s.increment();
 }
+export function set_count(s, count) {
+    s.count = count;
+}
 export function get_count(s) {
     return s.count;
 }")]
 extern "C" {
     fn increment_by_5(s: &JsValue);
+    fn set_count(s: &JsValue, count: i32);
     fn get_count(s: &JsValue) -> i32;
 }
 
@@ -30,6 +34,11 @@ impl Counter {
         self.count
     }
 
+    #[wasm_bindgen(setter)]
+    pub fn set_count(&mut self, count: i32) {
+        self.count = count * 2;
+    }
+
     pub fn increment(&mut self) {
         self.count += 1;
     }
@@ -41,4 +50,6 @@ pub(crate) fn test_struct_bindings() {
     let as_js_value = JsValue::from(counter);
     increment_by_5(&as_js_value);
     assert_eq!(get_count(&as_js_value), 5);
+    set_count(&as_js_value, 10);
+    assert_eq!(get_count(&as_js_value), 20);
 }

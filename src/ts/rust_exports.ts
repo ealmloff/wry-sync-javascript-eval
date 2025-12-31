@@ -1,5 +1,5 @@
-import { DataEncoder, DataDecoder } from "./encoding";
-import { handleBinaryResponse, MessageType, sync_request_binary, CALL_EXPORT_FN_ID, DROP_NATIVE_REF_FN_ID } from "./ipc";
+import { DataEncoder } from "./encoding";
+import { handleBinaryResponse, MessageType, sync_request_binary, CALL_EXPORT_FN_ID } from "./ipc";
 
 /**
  * FinalizationRegistry to notify Rust when exported object wrappers are GC'd.
@@ -22,6 +22,7 @@ const exportRegistry = new FinalizationRegistry<{ handle: number; className: str
 
 /**
  * Call an exported Rust method by name.
+ * This is exposed as window.__wryCallExport for generated class methods to use.
  */
 function callExport(exportName: string, ...args: any[]): any {
   window.jsHeap.pushBorrowFrame();
@@ -56,10 +57,17 @@ function callExport(exportName: string, ...args: any[]): any {
 
 /**
  * Create a JavaScript wrapper object for a Rust exported struct.
- * The wrapper has methods that call back into Rust.
+ * Uses the generated class from JsClassSpec if available, otherwise falls back to Proxy.
  */
 function createWrapper(handle: number, className: string): object {
-  // Create wrapper object with the handle stored
+  // Try to use the generated class if available
+  const ClassConstructor = (window as any)[className];
+  if (ClassConstructor && typeof ClassConstructor.__wrap === 'function') {
+    return ClassConstructor.__wrap(handle);
+  }
+
+  // Fallback: Create wrapper object with the handle stored (legacy Proxy approach)
+  // This will be removed once all classes are migrated to use JsClassSpec
   const wrapper: any = {
     __handle: handle,
     __className: className,
@@ -76,8 +84,6 @@ function createWrapper(handle: number, className: string): object {
         return undefined;
       }
       // Return a function that calls the Rust export when invoked
-      // For s.method(), this returns a function that is then called
-      // For s.property (getter), the caller should use s.property() or we define real getters
       return (...args: any[]) => {
         const exportName = `${className}::${String(prop)}`;
         // Pass the handle as the first argument (for self methods)
@@ -91,6 +97,10 @@ function createWrapper(handle: number, className: string): object {
 
   return proxy;
 }
+
+// Expose callExport and exportRegistry as window globals for generated classes to use
+(window as any).__wryCallExport = callExport;
+(window as any).__wryExportRegistry = exportRegistry;
 
 /**
  * RustExports manager - provides wrapper creation for exported structs.

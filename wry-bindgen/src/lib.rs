@@ -433,6 +433,59 @@ impl JsFunctionSpec {
 
 inventory::collect!(JsFunctionSpec);
 
+/// Type of class member for exported Rust structs
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JsClassMemberKind {
+    /// Constructor function (e.g., `Counter.new`)
+    Constructor,
+    /// Instance method on prototype (e.g., `Counter.prototype.increment`)
+    Method,
+    /// Static method on class (e.g., `Counter.staticMethod`)
+    StaticMethod,
+    /// Property getter (e.g., `get count()`)
+    Getter,
+    /// Property setter (e.g., `set count(v)`)
+    Setter,
+}
+
+/// Specification for a member of an exported Rust class
+///
+/// All class members (methods, constructors, getters, setters) are collected
+/// and used to generate complete class code in FunctionRegistry.
+#[derive(Clone, Copy)]
+pub struct JsClassMemberSpec {
+    /// The class name this member belongs to (e.g., "Counter")
+    pub class_name: &'static str,
+    /// The JavaScript member name (e.g., "increment", "count")
+    pub member_name: &'static str,
+    /// The export name for IPC calls (e.g., "Counter::increment")
+    pub export_name: &'static str,
+    /// Number of arguments (excluding self/handle)
+    pub arg_count: usize,
+    /// Type of member
+    pub kind: JsClassMemberKind,
+}
+
+impl JsClassMemberSpec {
+    pub const fn new(
+        class_name: &'static str,
+        member_name: &'static str,
+        export_name: &'static str,
+        arg_count: usize,
+        kind: JsClassMemberKind,
+    ) -> Self {
+        Self {
+            class_name,
+            member_name,
+            export_name,
+            arg_count,
+            kind,
+        }
+    }
+}
+
+inventory::collect!(JsClassMemberSpec);
+
 /// Specification for an exported Rust function/method callable from JavaScript.
 ///
 /// This is used by the `#[wasm_bindgen]` macro when exporting structs and impl blocks.
@@ -467,6 +520,14 @@ pub struct FunctionRegistry {
 
 pub static FUNCTION_REGISTRY: Lazy<FunctionRegistry> =
     Lazy::new(FunctionRegistry::collect_from_inventory);
+
+/// Generate argument names for JS function (a0, a1, a2, ...)
+fn generate_args(count: usize) -> String {
+    (0..count)
+        .map(|i| format!("a{}", i))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 impl FunctionRegistry {
     fn collect_from_inventory() -> Self {
@@ -520,6 +581,158 @@ impl FunctionRegistry {
             write!(&mut script, "{}", js_code).unwrap();
         }
         script.push_str("]);\n");
+
+        // Collect all class members and group by class name
+        let mut class_members: alloc::collections::BTreeMap<&str, Vec<&JsClassMemberSpec>> =
+            alloc::collections::BTreeMap::new();
+        for member in inventory::iter::<JsClassMemberSpec>() {
+            class_members
+                .entry(member.class_name)
+                .or_insert_with(Vec::new)
+                .push(member);
+        }
+
+        // Generate complete class definitions for each exported struct
+        for (class_name, members) in &class_members {
+            // Generate class shell
+            writeln!(
+                &mut script,
+                r#"  class {class_name} {{
+    constructor(handle) {{
+      this.__handle = handle;
+      this.__className = "{class_name}";
+      window.__wryExportRegistry.register(this, {{ handle, className: "{class_name}" }});
+    }}
+    static __wrap(handle) {{
+      const obj = Object.create({class_name}.prototype);
+      obj.__handle = handle;
+      obj.__className = "{class_name}";
+      window.__wryExportRegistry.register(obj, {{ handle, className: "{class_name}" }});
+      return obj;
+    }}
+    free() {{
+      const handle = this.__handle;
+      this.__handle = 0;
+      if (handle !== 0) window.__wryCallExport("{class_name}::__drop", handle);
+    }}"#,
+                class_name = class_name
+            )
+            .unwrap();
+
+            // Track getters/setters to combine them into single property descriptors
+            let mut getters: alloc::collections::BTreeMap<&str, &JsClassMemberSpec> =
+                alloc::collections::BTreeMap::new();
+            let mut setters: alloc::collections::BTreeMap<&str, &JsClassMemberSpec> =
+                alloc::collections::BTreeMap::new();
+
+            // Generate methods inside the class body
+            for member in members {
+                match member.kind {
+                    JsClassMemberKind::Method => {
+                        // Instance method
+                        let args = generate_args(member.arg_count);
+                        let args_with_handle = if member.arg_count > 0 {
+                            format!("this.__handle, {}", args)
+                        } else {
+                            "this.__handle".to_string()
+                        };
+                        writeln!(
+                            &mut script,
+                            r#"    {}({}) {{ return window.__wryCallExport("{}", {}); }}"#,
+                            member.member_name, args, member.export_name, args_with_handle
+                        )
+                        .unwrap();
+                    }
+                    JsClassMemberKind::Getter => {
+                        getters.insert(member.member_name, member);
+                    }
+                    JsClassMemberKind::Setter => {
+                        setters.insert(member.member_name, member);
+                    }
+                    _ => {} // Constructor and static handled separately
+                }
+            }
+
+            // Generate getters/setters as property accessors inside the class
+            let mut property_names: alloc::collections::BTreeSet<&str> =
+                alloc::collections::BTreeSet::new();
+            property_names.extend(getters.keys());
+            property_names.extend(setters.keys());
+
+            for prop_name in property_names {
+                let getter = getters.get(prop_name);
+                let setter = setters.get(prop_name);
+                match (getter, setter) {
+                    (Some(g), Some(s)) => {
+                        writeln!(
+                            &mut script,
+                            r#"    get {}() {{ return window.__wryCallExport("{}", this.__handle); }}
+    set {}(v) {{ window.__wryCallExport("{}", this.__handle, v); }}"#,
+                            prop_name, g.export_name, prop_name, s.export_name
+                        )
+                        .unwrap();
+                    }
+                    (Some(g), None) => {
+                        writeln!(
+                            &mut script,
+                            r#"    get {}() {{ return window.__wryCallExport("{}", this.__handle); }}"#,
+                            prop_name, g.export_name
+                        )
+                        .unwrap();
+                    }
+                    (None, Some(s)) => {
+                        writeln!(
+                            &mut script,
+                            r#"    set {}(v) {{ window.__wryCallExport("{}", this.__handle, v); }}"#,
+                            prop_name, s.export_name
+                        )
+                        .unwrap();
+                    }
+                    (None, None) => {}
+                }
+            }
+
+            // Close the class body
+            script.push_str("  }\n");
+
+            // Add static methods and constructors outside the class
+            for member in members {
+                match member.kind {
+                    JsClassMemberKind::Constructor => {
+                        let args = generate_args(member.arg_count);
+                        let args_call = if member.arg_count > 0 { &args } else { "" };
+                        writeln!(
+                            &mut script,
+                            r#"  {class_name}.{method_name} = function({args}) {{ const handle = window.__wryCallExport("{export_name}", {args_call}); return {class_name}.__wrap(handle); }};"#,
+                            class_name = class_name,
+                            method_name = member.member_name,
+                            args = args,
+                            export_name = member.export_name,
+                            args_call = args_call
+                        )
+                        .unwrap();
+                    }
+                    JsClassMemberKind::StaticMethod => {
+                        let args = generate_args(member.arg_count);
+                        let args_call = if member.arg_count > 0 { &args } else { "" };
+                        writeln!(
+                            &mut script,
+                            r#"  {class_name}.{method_name} = function({args}) {{ return window.__wryCallExport("{export_name}", {args_call}); }};"#,
+                            class_name = class_name,
+                            method_name = member.member_name,
+                            args = args,
+                            export_name = member.export_name,
+                            args_call = args_call
+                        )
+                        .unwrap();
+                    }
+                    _ => {} // Methods, getters, setters already handled
+                }
+            }
+
+            // Register class on window
+            writeln!(&mut script, "  window.{} = {};", class_name, class_name).unwrap();
+        }
 
         // Send a request to wry to notify that the function registry is ready
         script.push_str("  fetch('wry://ready', { method: 'POST', body: [] });\n");

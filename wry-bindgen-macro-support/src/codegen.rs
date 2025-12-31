@@ -1066,9 +1066,52 @@ fn generate_field_accessor(
         TokenStream::new()
     };
 
+    // Generate JsClassMemberSpec for the property getter
+    let js_class_name = struct_name.to_string();
+    let getter_member_spec = quote_spanned! {span=>
+        const _: () = {
+            #[allow(non_upper_case_globals)]
+            static __GETTER_MEMBER_SPEC: #krate::JsClassMemberSpec = #krate::JsClassMemberSpec::new(
+                #js_class_name,
+                #js_field_name,
+                #getter_name,
+                0,
+                #krate::JsClassMemberKind::Getter
+            );
+
+            #krate::inventory::submit! {
+                __GETTER_MEMBER_SPEC
+            }
+        };
+    };
+
+    // Generate JsClassMemberSpec for the property setter (unless readonly)
+    let setter_member_spec = if !field.readonly {
+        quote_spanned! {span=>
+            const _: () = {
+                #[allow(non_upper_case_globals)]
+                static __SETTER_MEMBER_SPEC: #krate::JsClassMemberSpec = #krate::JsClassMemberSpec::new(
+                    #js_class_name,
+                    #js_field_name,
+                    #setter_name,
+                    1,
+                    #krate::JsClassMemberKind::Setter
+                );
+
+                #krate::inventory::submit! {
+                    __SETTER_MEMBER_SPEC
+                }
+            };
+        }
+    } else {
+        TokenStream::new()
+    };
+
     Ok(quote_spanned! {span=>
         #getter_impl
         #setter_impl
+        #getter_member_spec
+        #setter_member_spec
     })
 }
 
@@ -1096,6 +1139,8 @@ fn generate_inspectable(
         .collect();
 
     let struct_name_str = struct_name.to_string();
+
+    let js_name_str = js_name.to_string();
 
     Ok(quote_spanned! {span=>
         const _: () = {
@@ -1128,6 +1173,22 @@ fn generate_inspectable(
             }
         };
 
+        // JsClassMemberSpec for toJSON method
+        const _: () = {
+            #[allow(non_upper_case_globals)]
+            static __TO_JSON_MEMBER_SPEC: #krate::JsClassMemberSpec = #krate::JsClassMemberSpec::new(
+                #js_name_str,
+                "toJSON",
+                #to_json_name,
+                0,
+                #krate::JsClassMemberKind::Method
+            );
+
+            #krate::inventory::submit! {
+                __TO_JSON_MEMBER_SPEC
+            }
+        };
+
         const _: () = {
             #[allow(non_upper_case_globals)]
             static __TO_STRING_SPEC: #krate::JsExportSpec = #krate::JsExportSpec::new(
@@ -1147,6 +1208,22 @@ fn generate_inspectable(
 
             #krate::inventory::submit! {
                 __TO_STRING_SPEC
+            }
+        };
+
+        // JsClassMemberSpec for toString method
+        const _: () = {
+            #[allow(non_upper_case_globals)]
+            static __TO_STRING_MEMBER_SPEC: #krate::JsClassMemberSpec = #krate::JsClassMemberSpec::new(
+                #js_name_str,
+                "toString",
+                #to_string_name,
+                0,
+                #krate::JsClassMemberKind::Method
+            );
+
+            #krate::inventory::submit! {
+                __TO_STRING_MEMBER_SPEC
             }
         };
     })
@@ -1358,6 +1435,33 @@ fn generate_export_method(method: &ExportMethod, krate: &TokenStream) -> syn::Re
         }
     };
 
+    // Generate JsClassMemberSpec for the method
+    let arg_count = method.arguments.len();
+    let (member_name, member_kind) = match &method.kind {
+        ExportMethodKind::Constructor => (js_name.clone(), quote! { #krate::JsClassMemberKind::Constructor }),
+        ExportMethodKind::Method { .. } => (js_name.clone(), quote! { #krate::JsClassMemberKind::Method }),
+        ExportMethodKind::StaticMethod => (js_name.clone(), quote! { #krate::JsClassMemberKind::StaticMethod }),
+        ExportMethodKind::Getter { property } => (property.clone(), quote! { #krate::JsClassMemberKind::Getter }),
+        ExportMethodKind::Setter { property } => (property.clone(), quote! { #krate::JsClassMemberKind::Setter }),
+    };
+
+    let js_class_member_spec = quote_spanned! {span=>
+        const _: () = {
+            #[allow(non_upper_case_globals)]
+            static __CLASS_MEMBER_SPEC: #krate::JsClassMemberSpec = #krate::JsClassMemberSpec::new(
+                #class_str,
+                #member_name,
+                #export_name,
+                #arg_count,
+                #member_kind
+            );
+
+            #krate::inventory::submit! {
+                __CLASS_MEMBER_SPEC
+            }
+        };
+    };
+
     Ok(quote_spanned! {span=>
         #method_impl
 
@@ -1374,5 +1478,7 @@ fn generate_export_method(method: &ExportMethod, krate: &TokenStream) -> syn::Re
                 __EXPORT_SPEC
             }
         };
+
+        #js_class_member_spec
     })
 }
