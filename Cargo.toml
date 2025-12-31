@@ -24,7 +24,7 @@ wasm-bindgen-macro = { package = "wry-bindgen-macro", path = "wry-bindgen-macro"
 lazy-js-bundle = { git = "https://github.com/DioxusLabs/dioxus" }
 
 [dev-dependencies]
-web-sys = { path = "wasm-bindgen/crates/web-sys", features = ['CssStyleDeclaration', 'Document', 'Element', 'HtmlElement', 'Window'] }
+web-sys = { path = "wasm-bindgen/crates/web-sys", features = ["CssStyleDeclaration", "Element", "HtmlElement", "Window", "CanvasRenderingContext2d", "Document", "HtmlCanvasElement", "MouseEvent"] }
 wasm-bindgen-futures = { path = "wasm-bindgen/crates/futures" }
 js-sys = { path = "wasm-bindgen/crates/js-sys" }
 
