@@ -82,7 +82,7 @@ pub fn generate(program: &Program) -> syn::Result<TokenStream> {
 
     // Generate static definitions
     for st in &program.statics {
-        tokens.extend(generate_static(st, krate)?);
+        tokens.extend(generate_static(st, krate, &prefix)?);
     }
 
     // Generate string enum definitions
@@ -697,7 +697,7 @@ fn extract_type_name(ty: &syn::Type) -> syn::Result<&syn::Ident> {
 }
 
 /// Generate code for an imported static
-fn generate_static(st: &ImportStatic, krate: &TokenStream) -> syn::Result<TokenStream> {
+fn generate_static(st: &ImportStatic, krate: &TokenStream, prefix: &str) -> syn::Result<TokenStream> {
     let vis = &st.vis;
     let rust_name = &st.rust_name;
     let ty = &st.ty;
@@ -707,7 +707,7 @@ fn generate_static(st: &ImportStatic, krate: &TokenStream) -> syn::Result<TokenS
     let registry_name = format!("__static_{}", rust_name);
 
     // Generate JavaScript code to access the static
-    let js_code = generate_static_js_code(st);
+    let js_code = generate_static_js_code(st, prefix);
 
     assert!(st.thread_local_v2);
 
@@ -739,16 +739,21 @@ fn generate_static(st: &ImportStatic, krate: &TokenStream) -> syn::Result<TokenS
 }
 
 /// Generate JavaScript code to access a static value
-fn generate_static_js_code(st: &ImportStatic) -> String {
+fn generate_static_js_code(st: &ImportStatic, prefix: &str) -> String {
     let js_name = &st.js_name;
 
-    // Build the full path with namespace if present
-    if let Some(ref namespace) = st.js_namespace {
-        let namespace_path = namespace.join(".");
-        format!("() => {}.{}", namespace_path, js_name)
+    // Build the prefix with namespace if present
+    let full_prefix = if let Some(ref namespace) = st.js_namespace {
+        if !namespace.is_empty() {
+            format!("{prefix}{}.", namespace.join("."))
+        } else {
+            prefix.to_string()
+        }
     } else {
-        format!("() => {}", js_name)
-    }
+        prefix.to_string()
+    };
+
+    format!("() => {}{}", full_prefix, js_name)
 }
 
 /// Generate code for a string enum
