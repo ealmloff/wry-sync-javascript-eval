@@ -107,3 +107,11 @@ pub fn remove_object<T: 'static>(handle: ObjectHandle) -> T {
 pub fn drop_object(handle: ObjectHandle) -> bool {
     OBJECT_STORE.with(|store| store.borrow_mut().remove_untyped(handle))
 }
+
+/// Create a JavaScript wrapper object for an exported Rust struct.
+/// The wrapper is a JS object with methods that call back into Rust via the export specs.
+pub fn create_js_wrapper<T: 'static>(handle: ObjectHandle, class_name: &str) -> crate::JsValue {
+    // Call into JavaScript to create the wrapper object
+    // The JS side will create an object with the appropriate methods
+    crate::js_helpers::create_rust_object_wrapper(handle.as_raw(), class_name)
+}

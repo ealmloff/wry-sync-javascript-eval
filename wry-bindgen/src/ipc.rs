@@ -85,6 +85,12 @@ impl fmt::Display for DecodeError {
 
 impl core::error::Error for DecodeError {}
 
+impl From<DecodeError> for String {
+    fn from(err: DecodeError) -> String {
+        err.to_string()
+    }
+}
+
 /// Message type identifier for IPC protocol.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

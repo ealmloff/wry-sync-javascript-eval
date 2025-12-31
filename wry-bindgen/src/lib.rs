@@ -421,6 +421,7 @@ inventory::collect!(JsFunctionSpec);
 ///
 /// This is used by the `#[wasm_bindgen]` macro when exporting structs and impl blocks.
 /// Each export is registered via inventory and collected at runtime.
+#[derive(Clone, Copy)]
 pub struct JsExportSpec {
     /// The export name (e.g., "MyStruct::new", "MyStruct::method")
     pub name: &'static str,

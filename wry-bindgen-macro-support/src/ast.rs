@@ -237,6 +237,10 @@ pub struct ExportMethod {
     pub catch: bool,
     /// User-provided attributes (like #[cfg(...)] and #[doc = "..."])
     pub rust_attrs: Vec<syn::Attribute>,
+    /// Method visibility
+    pub vis: syn::Visibility,
+    /// The original method body
+    pub body: syn::Block,
 }
 
 /// Kind of exported method
@@ -532,6 +536,8 @@ fn parse_impl_method(
         ret,
         catch: method_attrs.catch.is_some(),
         rust_attrs,
+        vis: method.vis.clone(),
+        body: method.block.clone(),
     })
 }
 

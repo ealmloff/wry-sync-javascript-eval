@@ -138,3 +138,8 @@ export function clone_heap_ref(heapId: number): unknown {
 export function drop_heap_ref(heapId: number): void {
   window.jsHeap.remove(heapId);
 }
+
+// Create a wrapper object for an exported Rust struct
+export function create_rust_object_wrapper(handle: number, className: string): unknown {
+  return window.rustExports.createWrapper(handle, className);
+}

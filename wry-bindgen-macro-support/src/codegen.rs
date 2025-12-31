@@ -958,11 +958,23 @@ fn generate_export_struct(s: &ExportStruct, krate: &TokenStream) -> syn::Result<
         TokenStream::new()
     };
 
+    // Generate From<StructName> for JsValue - inserts into object store and returns handle
+    let into_jsvalue_impl = quote_spanned! {span=>
+        impl ::core::convert::From<#rust_name> for #krate::JsValue {
+            fn from(val: #rust_name) -> Self {
+                let handle = #krate::object_store::insert_object(val);
+                // Create a JS object wrapper with the handle
+                #krate::object_store::create_js_wrapper::<#rust_name>(handle, #js_name)
+            }
+        }
+    };
+
     Ok(quote_spanned! {span=>
         #struct_def
         #field_impls
         #drop_impl
         #inspectable_impl
+        #into_jsvalue_impl
     })
 }
 
@@ -1282,7 +1294,73 @@ fn generate_export_method(method: &ExportMethod, krate: &TokenStream) -> syn::Re
         }
     };
 
+    // Generate the actual impl method
+    let vis = &method.vis;
+    let body = &method.body;
+    let rust_attrs = &method.rust_attrs;
+    let arg_names_idents: Vec<_> = method.arguments.iter().map(|a| &a.name).collect();
+    let arg_types_refs: Vec<_> = method.arguments.iter().map(|a| &a.ty).collect();
+
+    let fn_args: Vec<_> = arg_names_idents
+        .iter()
+        .zip(arg_types_refs.iter())
+        .map(|(name, ty)| quote_spanned! {span=> #name: #ty })
+        .collect();
+
+    let ret_type = match &method.ret {
+        Some(ty) => quote_spanned! {span=> -> #ty },
+        None => quote_spanned! {span=> },
+    };
+
+    let method_impl = match &method.kind {
+        ExportMethodKind::Constructor | ExportMethodKind::StaticMethod => {
+            // No self parameter
+            quote_spanned! {span=>
+                impl #class {
+                    #(#rust_attrs)*
+                    #vis fn #rust_name(#(#fn_args),*) #ret_type #body
+                }
+            }
+        }
+        ExportMethodKind::Method { self_ty } => {
+            let receiver = match self_ty {
+                SelfType::RefShared => quote_spanned! {span=> &self },
+                SelfType::RefMutable => quote_spanned! {span=> &mut self },
+                SelfType::ByValue => quote_spanned! {span=> self },
+            };
+            let fn_args_with_self = if fn_args.is_empty() {
+                quote_spanned! {span=> #receiver }
+            } else {
+                quote_spanned! {span=> #receiver, #(#fn_args),* }
+            };
+            quote_spanned! {span=>
+                impl #class {
+                    #(#rust_attrs)*
+                    #vis fn #rust_name(#fn_args_with_self) #ret_type #body
+                }
+            }
+        }
+        ExportMethodKind::Getter { .. } => {
+            quote_spanned! {span=>
+                impl #class {
+                    #(#rust_attrs)*
+                    #vis fn #rust_name(&self) #ret_type #body
+                }
+            }
+        }
+        ExportMethodKind::Setter { .. } => {
+            quote_spanned! {span=>
+                impl #class {
+                    #(#rust_attrs)*
+                    #vis fn #rust_name(&mut self, #(#fn_args),*) #body
+                }
+            }
+        }
+    };
+
     Ok(quote_spanned! {span=>
+        #method_impl
+
         const _: () = {
             #[allow(non_upper_case_globals)]
             static __EXPORT_SPEC: #krate::JsExportSpec = #krate::JsExportSpec::new(

@@ -10,6 +10,7 @@ mod jsvalue;
 mod roundtrip;
 mod string_enum;
 mod thread_local;
+mod structs;
 
 #[wasm_bindgen(inline_js = "export function heap_objects_alive(f) {
     return window.jsHeap.heapObjectsAlive();
@@ -88,6 +89,9 @@ fn main() {
         test_with_js_context(catch_attribute::test_catch_successful_call);
         test_with_js_context(catch_attribute::test_catch_with_arguments);
         test_with_js_context(catch_attribute::test_catch_method);
+
+        // Struct bindings tests
+        test_with_js_context(structs::test_struct_bindings);
 
         // Clamped type tests
         test_with_js_context(clamped::test_clamped_is_uint8clampedarray);
