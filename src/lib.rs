@@ -10,11 +10,13 @@ use wasm_bindgen::{FUNCTION_REGISTRY, FunctionRegistry};
 pub mod bindings;
 mod home;
 mod webview;
+pub mod wry_bindgen;
 
 use webview::State;
 
 // Re-export bindings for convenience
 pub use bindings::set_on_log;
+pub use wry_bindgen::WryBindgen;
 
 // Re-export prelude items that apps need
 pub use wasm_bindgen::JsValue;
