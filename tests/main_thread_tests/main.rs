@@ -30,8 +30,8 @@ fn test_with_js_context<F: FnOnce()>(f: F) {
 
 fn main() {
     wry_testing::run_headless(|| {
-        set_on_error(Closure::new(|err: String| {
-            panic!("[ERROR IN JS CONSOLE] {}", err);
+        set_on_error(Closure::new(|err: String, stack: String| {
+            panic!("[ERROR IN JS CONSOLE] {}\nStack trace:\n{}", err, stack);
         }));
 
         set_on_log(Closure::new(|msg: String| {

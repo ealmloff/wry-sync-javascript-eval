@@ -40,11 +40,11 @@ export function set_on_log(callback) {
 
 export function set_on_error(callback) {
     window.addEventListener('error', function(event) {
-        callback(event.message + ' at ' + event.filename + ':' + event.lineno + ':' + event.colno);
+        callback(event.message + ' at ' + event.filename + ':' + event.lineno + ':' + event.colno, event.error ? event.error.stack : '');
     });
 }
 "#)]
 extern "C" {
     pub fn set_on_log(callback: Closure<dyn FnMut(String)>);
-    pub fn set_on_error(callback: Closure<dyn FnMut(String)>);
+    pub fn set_on_error(callback: Closure<dyn FnMut(String, String)>);
 }
