@@ -25,7 +25,13 @@ pub fn generate(program: &Program) -> syn::Result<TokenStream> {
         if let Some((span, inline_js_module)) = &program.attrs.inline_js {
             Some((*span, inline_js_module.to_token_stream()))
         } else if let Some((span, module_path)) = &program.attrs.module {
-            Some((*span, quote_spanned! {*span=> include_str!(#module_path) }))
+            // If path starts with '/', make it relative to CARGO_MANIFEST_DIR
+            let include_expr = if module_path.starts_with('/') {
+                quote_spanned! {*span=> include_str!(concat!(env!("CARGO_MANIFEST_DIR"), #module_path)) }
+            } else {
+                quote_spanned! {*span=> include_str!(#module_path) }
+            };
+            Some((*span, include_expr))
         } else {
             None
         };
@@ -977,12 +983,69 @@ fn generate_export_struct(s: &ExportStruct, krate: &TokenStream) -> syn::Result<
         }
     };
 
+    // Generate EncodeTypeDef - exported structs use HeapRef encoding
+    let encode_type_def_impl = quote_spanned! {span=>
+        impl #krate::EncodeTypeDef for #rust_name {
+            fn encode_type_def(buf: &mut #krate::alloc::vec::Vec<u8>) {
+                buf.push(#krate::encode::TypeTag::HeapRef as u8);
+            }
+        }
+    };
+
+    // Generate BinaryEncode - encode struct by converting to JsValue
+    let binary_encode_impl = quote_spanned! {span=>
+        impl #krate::BinaryEncode for #rust_name {
+            fn encode(self, encoder: &mut #krate::EncodedData) {
+                // Convert to JsValue (which inserts into object store and creates wrapper)
+                let js_value = #krate::JsValue::from(self);
+                // Encode the JsValue
+                js_value.encode(encoder);
+            }
+        }
+    };
+
+    // Generate BinaryDecode - decode JsValue, extract handle, remove from object store
+    let binary_decode_impl = quote_spanned! {span=>
+        impl #krate::BinaryDecode for #rust_name {
+            fn decode(decoder: &mut #krate::DecodedData) -> ::core::result::Result<Self, #krate::DecodeError> {
+                // Decode the JsValue
+                let js = #krate::JsValue::decode(decoder)?;
+                // Extract handle from JS wrapper
+                let handle = #krate::extract_rust_handle(&js)
+                    .ok_or_else(|| #krate::DecodeError::Custom(
+                        #krate::alloc::string::String::from("expected Rust object wrapper")
+                    ))?;
+                // Remove from object store and return owned value
+                Ok(#krate::object_store::remove_object::<#rust_name>(
+                    #krate::object_store::ObjectHandle::from_raw(handle)
+                ))
+            }
+        }
+    };
+
+    // Generate BatchableResult - exported structs need flush to get actual value
+    let batchable_result_impl = quote_spanned! {span=>
+        impl #krate::BatchableResult for #rust_name {
+            fn needs_flush() -> bool {
+                true
+            }
+
+            fn batched_placeholder(_: &mut #krate::batch::BatchState) -> Self {
+                ::core::unreachable!("needs_flush types should never call batched_placeholder")
+            }
+        }
+    };
+
     Ok(quote_spanned! {span=>
         #struct_def
         #field_impls
         #drop_impl
         #inspectable_impl
         #into_jsvalue_impl
+        #encode_type_def_impl
+        #binary_encode_impl
+        #binary_decode_impl
+        #batchable_result_impl
     })
 }
 
