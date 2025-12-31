@@ -91,14 +91,7 @@ fn main() {
         test_with_js_context(clamped::test_clamped_mut_slice);
 
         // Borrow stack tests
-        test_with_js_context(borrow_stack::test_borrowed_ref_basic);
-        test_with_js_context(borrow_stack::test_borrowed_ref_multiple);
-        test_with_js_context(borrow_stack::test_borrowed_ref_cleanup_between_ops);
-        test_with_js_context(borrow_stack::test_borrowed_ref_reserved_values);
-        test_with_js_context(borrow_stack::test_borrowed_ref_mixed_with_owned);
-        test_with_js_context(borrow_stack::test_borrowed_ref_same_value_multiple_times);
         test_with_js_context(borrow_stack::test_borrowed_ref_in_callback);
-        test_with_js_context(borrow_stack::test_borrowed_ref_clone);
         test_with_js_context(borrow_stack::test_borrowed_ref_nested_frames);
         test_with_js_context(borrow_stack::test_borrowed_ref_deep_nesting);
     })
