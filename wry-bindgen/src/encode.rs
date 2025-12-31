@@ -670,7 +670,7 @@ macro_rules! decode_args {
 
 macro_rules! impl_fnmut_stub {
     ($($arg:ident),*) => {
-        // Implement EncodeTypeDef for dyn FnMut(...) -> R
+        // Implement EncodeTypeDef for fn(owned*) -> R
         impl<R, $($arg,)*> EncodeTypeDef for CallbackKey<fn($($arg),*) -> R>
             where
             $($arg: EncodeTypeDef + 'static, )*
@@ -995,7 +995,7 @@ macro_rules! impl_fnmut_stub_ref {
                         result.encode(encoder);
                     },
                 ));
-                $crate::__rt::wbg_cast::<CallbackKey<fn($first, $($rest),*) -> R>, crate::Closure<Self>>(
+                $crate::__rt::wbg_cast::<CallbackKey<fn(&$first, $($rest),*) -> R>, crate::Closure<Self>>(
                     CallbackKey(key.data().as_ffi(), PhantomData)
                 )
             }
@@ -1019,7 +1019,7 @@ macro_rules! impl_fnmut_stub_ref {
                         result.encode(encoder);
                     },
                 ));
-                $crate::__rt::wbg_cast::<CallbackKey<fn($first, $($rest),*) -> R>, crate::Closure<Self>>(
+                $crate::__rt::wbg_cast::<CallbackKey<fn(&$first, $($rest),*) -> R>, crate::Closure<Self>>(
                     CallbackKey(key.data().as_ffi(), PhantomData)
                 )
             }
@@ -1045,7 +1045,7 @@ macro_rules! impl_fnmut_stub_ref {
                         result.encode(encoder);
                     },
                 ));
-                $crate::__rt::wbg_cast::<CallbackKey<fn($first, $($rest),*) -> R>, Self::Output>(
+                $crate::__rt::wbg_cast::<CallbackKey<fn(&$first, $($rest),*) -> R>, Self::Output>(
                     CallbackKey(key.data().as_ffi(), PhantomData)
                 )
             }
@@ -1127,7 +1127,7 @@ macro_rules! impl_fn_once_ref {
                         result.encode(encoder);
                     },
                 ));
-                $crate::__rt::wbg_cast::<CallbackKey<fn($first, $($rest),*) -> R>, Closure<dyn FnMut(&$first, $($rest),*) -> R>>(
+                $crate::__rt::wbg_cast::<CallbackKey<fn(&$first, $($rest),*) -> R>, Closure<dyn FnMut(&$first, $($rest),*) -> R>>(
                     CallbackKey(key.data().as_ffi(), PhantomData)
                 )
             }
