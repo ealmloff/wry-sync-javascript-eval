@@ -16,6 +16,34 @@ pub(crate) fn test_borrowed_ref_in_callback() {
         export function make_value() { return { x: 42 }; }
     "#)]
     extern "C" {
+        fn call_with_value(cb: Closure<dyn FnMut(&JsValue)>, val: &JsValue);
+        fn make_value() -> JsValue;
+    }
+
+    let val = make_value();
+
+    let response = Rc::new(std::cell::Cell::new(false));
+    let response_clone = response.clone();
+    // Callback receives a borrowed ref
+    let callback = Closure::new(move |v: &JsValue| {
+        // The value should be an object with x = 42
+        response_clone.set(!v.is_undefined() && !v.is_null())
+    });
+
+    call_with_value(callback, &val);
+    let result = response.get();
+    assert!(result, "Callback should receive valid borrowed ref");
+}
+
+/// Test borrowed refs with callbacks
+pub(crate) fn test_borrowed_ref_in_callback_with_return() {
+    use wasm_bindgen::Closure;
+
+    #[wasm_bindgen(inline_js = r#"
+        export function call_with_value(cb, val) { return cb(val); }
+        export function make_value() { return { x: 42 }; }
+    "#)]
+    extern "C" {
         fn call_with_value(cb: Closure<dyn FnMut(&JsValue) -> bool>, val: &JsValue) -> bool;
         fn make_value() -> JsValue;
     }

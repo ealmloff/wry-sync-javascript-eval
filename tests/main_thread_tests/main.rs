@@ -93,6 +93,7 @@ fn main() {
 
         // Borrow stack tests
         test_with_js_context(borrow_stack::test_borrowed_ref_in_callback);
+        test_with_js_context(borrow_stack::test_borrowed_ref_in_callback_with_return);
         test_with_js_context(borrow_stack::test_borrowed_ref_nested_frames);
         test_with_js_context(borrow_stack::test_borrowed_ref_deep_nesting);
 
