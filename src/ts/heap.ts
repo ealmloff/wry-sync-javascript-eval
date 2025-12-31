@@ -13,6 +13,8 @@ class JSHeap {
   private maxId: number;
   // Borrow stack uses indices 1-127, growing downward from 127 to 1
   private borrowStackPointer: number;
+  // Frame stack for nested operations - saves borrow stack pointers
+  private borrowFrameStack: number[];
 
   constructor() {
     // Pre-allocate slots array - slots 0-127 are for borrow stack (1-127 usable),
@@ -30,6 +32,8 @@ class JSHeap {
     this.maxId = JSIDX_RESERVED;
     // Borrow stack pointer starts at 128 (just below reserved values)
     this.borrowStackPointer = JSIDX_OFFSET;
+    // Frame stack starts empty
+    this.borrowFrameStack = [];
   }
 
   insert(value: unknown): number {
@@ -88,6 +92,28 @@ class JSHeap {
       this.slots[i] = undefined;
     }
     this.borrowStackPointer = JSIDX_OFFSET;
+  }
+
+  // Push a borrow frame before a nested operation that may add borrowed refs
+  // This saves the current borrow stack pointer so we can restore it later
+  pushBorrowFrame(): void {
+    this.borrowFrameStack.push(this.borrowStackPointer);
+  }
+
+  // Pop a borrow frame after a nested operation completes
+  // This clears only the borrowed refs from this frame and restores the pointer
+  popBorrowFrame(): void {
+    const savedPointer = this.borrowFrameStack.pop();
+    if (savedPointer !== undefined) {
+      // Clear refs from this frame only (from current pointer up to saved pointer)
+      for (let i = this.borrowStackPointer; i < savedPointer; i++) {
+        this.slots[i] = undefined;
+      }
+      this.borrowStackPointer = savedPointer;
+    } else {
+      // No frame to restore, full reset to base
+      this.resetBorrowStack();
+    }
   }
 
   // Get the current borrow stack pointer (for testing)

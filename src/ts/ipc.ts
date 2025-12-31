@@ -138,6 +138,10 @@ function handleBinaryResponse(
     const encoder = new DataEncoder();
     encoder.pushU8(MessageType.Respond);
 
+    // Push a single borrow frame for this entire Evaluate message
+    // This frame persists across all operations and nested calls
+    window.jsHeap.pushBorrowFrame();
+
     // Process all operations
     while (decoder.hasMoreU32()) {
       const fnId = decoder.takeU32();
@@ -159,10 +163,10 @@ function handleBinaryResponse(
 
       // Encode the result using the return type
       typeInfo.returnType.encode(encoder, result);
-
-      // Reset borrow stack after each operation - borrowed refs are only valid during the operation
-      window.jsHeap.resetBorrowStack();
     }
+
+    // Pop the borrow frame after all operations complete
+    window.jsHeap.popBorrowFrame();
 
     const nextResponse = sync_request_binary(
       "wry://handler",

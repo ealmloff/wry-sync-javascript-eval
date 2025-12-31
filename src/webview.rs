@@ -1,7 +1,7 @@
 use base64::Engine;
 use std::cell::RefCell;
-use std::fmt::Debug;
 use std::rc::Rc;
+
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -106,13 +106,28 @@ impl ApplicationHandler<AppEvent> for State {
                     return;
                 };
                 if real_path == "handler" {
-                    match msg.ty().unwrap() {
+                    let msg_type = msg.ty().unwrap();
+                    match msg_type {
                         MessageType::Evaluate => {
-                            shared.push_ongoing_request(OngoingRustCall { responder });
+                            // New call from JS - save responder and wait for Rust to respond
+                            shared.set_ongoing_request(responder);
                         }
-                        _ => {
-                            shared.ongoing_request = OngoingRequestState::Completed;
-                            responder.respond(blank_response());
+                        MessageType::Respond => {
+                            // JS is sending a result back to Rust
+                            if shared.is_in_conversation() {
+                                // We're in the middle of a conversation (Rust sent an Evaluate,
+                                // JS processed it, now sending the result). Save responder and
+                                // wait for Rust to send the next message (another Evaluate or
+                                // the final Respond).
+                                if shared.pending_evaluates > 0 {
+                                    shared.pending_evaluates -= 1;
+                                }
+                                shared.set_ongoing_request(responder);
+                            } else {
+                                // No active conversation - this is the final result.
+                                // Respond immediately with blank.
+                                responder.respond(blank_response());
+                            }
                         }
                     }
                     get_runtime().queue_rust_call(msg);
@@ -175,7 +190,7 @@ impl ApplicationHandler<AppEvent> for State {
 
                 let mut shared = self.shared.borrow_mut();
 
-                if let OngoingRequestState::Pending(_) = &shared.ongoing_request {
+                if shared.has_pending_request() {
                     shared.respond_to_request(ipc_msg);
                     return;
                 }
@@ -225,23 +240,35 @@ impl ApplicationHandler<AppEvent> for State {
 
 #[derive(Default)]
 struct SharedWebviewState {
-    ongoing_request: OngoingRequestState,
+    ongoing_request: Option<RequestAsyncResponder>,
+    /// Count of Evaluates we've sent to JS that we're still waiting for responses to
+    pending_evaluates: usize,
 }
 
 impl SharedWebviewState {
-    fn push_ongoing_request(&mut self, ongoing: OngoingRustCall) {
-        self.ongoing_request = OngoingRequestState::Pending(ongoing.responder);
+    fn set_ongoing_request(&mut self, responder: RequestAsyncResponder) {
+        self.ongoing_request = Some(responder);
+    }
+
+    fn take_ongoing_request(&mut self) -> Option<RequestAsyncResponder> {
+        self.ongoing_request.take()
+    }
+
+    fn has_pending_request(&self) -> bool {
+        self.ongoing_request.is_some()
+    }
+
+    fn is_in_conversation(&self) -> bool {
+        self.has_pending_request() || self.pending_evaluates > 0
     }
 
     fn respond_to_request(&mut self, response: IPCMessage) {
-        if let OngoingRequestState::Pending(responder) = self.ongoing_request.take() {
+        if let Some(responder) = self.take_ongoing_request() {
             let ty = response.ty().unwrap();
-            self.ongoing_request = match ty {
-                MessageType::Evaluate => OngoingRequestState::Querying,
-                MessageType::Respond => OngoingRequestState::Completed,
-            };
+            if ty == MessageType::Evaluate {
+                self.pending_evaluates += 1;
+            }
 
-            // Send binary response data
             let body = response.into_data();
             responder.respond(
                 wry::http::Response::builder()
@@ -283,31 +310,3 @@ fn not_found_response() -> wry::http::Response<Vec<u8>> {
         .expect("Failed to build not found response")
 }
 
-struct OngoingRustCall {
-    // The request associated with this call
-    responder: RequestAsyncResponder,
-}
-
-#[derive(Default)]
-enum OngoingRequestState {
-    Pending(RequestAsyncResponder),
-    Querying,
-    #[default]
-    Completed,
-}
-
-impl Debug for OngoingRequestState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            OngoingRequestState::Pending(_) => write!(f, "Pending"),
-            OngoingRequestState::Querying => write!(f, "Querying"),
-            OngoingRequestState::Completed => write!(f, "Completed"),
-        }
-    }
-}
-
-impl OngoingRequestState {
-    fn take(&mut self) -> OngoingRequestState {
-        std::mem::replace(self, OngoingRequestState::Completed)
-    }
-}

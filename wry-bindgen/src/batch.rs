@@ -30,6 +30,8 @@ pub struct BatchState {
     /// Borrow stack pointer - uses indices 1-127, growing downward from JSIDX_OFFSET (128) to 1
     /// Reset after each operation completes
     borrow_stack_pointer: u64,
+    /// Frame stack for nested operations - saves borrow stack pointers
+    borrow_frame_stack: Vec<u64>,
 }
 
 impl BatchState {
@@ -43,6 +45,8 @@ impl BatchState {
             is_batching: false,
             // Borrow stack starts at JSIDX_OFFSET (128) and grows downward to 1
             borrow_stack_pointer: JSIDX_OFFSET,
+            // Frame stack starts empty
+            borrow_frame_stack: Vec::new(),
         }
     }
 
@@ -79,6 +83,23 @@ impl BatchState {
     /// This should be called after each operation finishes to clean up borrowed refs.
     pub fn reset_borrow_stack(&mut self) {
         self.borrow_stack_pointer = JSIDX_OFFSET;
+    }
+
+    /// Push a borrow frame before a nested operation that may use borrowed refs.
+    /// This saves the current borrow stack pointer so we can restore it later.
+    pub fn push_borrow_frame(&mut self) {
+        self.borrow_frame_stack.push(self.borrow_stack_pointer);
+    }
+
+    /// Pop a borrow frame after a nested operation completes.
+    /// This restores the borrow stack pointer to where it was before the nested operation.
+    pub fn pop_borrow_frame(&mut self) {
+        if let Some(saved_pointer) = self.borrow_frame_stack.pop() {
+            self.borrow_stack_pointer = saved_pointer;
+        } else {
+            // No frame to restore, full reset to base
+            self.reset_borrow_stack();
+        }
     }
 
     /// Release a heap ID back to the free-list and queue it for JS drop.

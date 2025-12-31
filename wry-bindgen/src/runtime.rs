@@ -165,9 +165,15 @@ fn handle_rust_callback(runtime: &WryRuntime, data: &mut DecodedData) {
                     .downcast_mut::<RustCallback>()
                     .expect("Failed to downcast to RustCallback");
 
+                // Push a borrow frame before calling the callback - nested calls won't clear our borrowed refs
+                crate::batch::BATCH_STATE.with(|state| state.borrow_mut().push_borrow_frame());
+
                 let response = IPCMessage::new_respond(|encoder| {
                     (function_callback.f)(data, encoder);
                 });
+
+                // Pop the borrow frame after the callback completes
+                crate::batch::BATCH_STATE.with(|state| state.borrow_mut().pop_borrow_frame());
 
                 runtime.js_response(response);
 

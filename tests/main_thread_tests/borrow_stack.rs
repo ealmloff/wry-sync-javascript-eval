@@ -27,7 +27,13 @@ pub(crate) fn test_borrowed_ref_in_callback() {
     // Callback receives a borrowed ref
     let callback = Closure::new(move |v: &JsValue| {
         // The value should be an object with x = 42
-        response_clone.set(!v.is_undefined() && !v.is_null())
+        println!("calling is_undefined");
+        let is_undefined = v.is_undefined();
+        println!("is_undefined = {}", is_undefined);
+        println!("calling is_null");
+        let is_null = v.is_null();
+        println!("is_null = {}", is_null);
+        response_clone.set(!is_undefined && !is_null)
     });
 
     call_with_value(callback, &val);

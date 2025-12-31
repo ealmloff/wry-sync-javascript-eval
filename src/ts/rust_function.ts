@@ -35,19 +35,26 @@ class RustFunction {
   }
 
   call(...args: any[]): any {
+    // Push a borrow frame before encoding args - nested calls won't clear our borrowed refs
+    window.jsHeap.pushBorrowFrame();
+
     // Build Evaluate message: [0, fn_id]
     const encoder = new DataEncoder();
     encoder.pushU8(MessageType.Evaluate);
     encoder.pushU32(0); // Call argument function
     encoder.pushU64(this.fnId);
-    // Encode arguments
+    // Encode arguments (may put borrowed refs on the borrow stack)
     for (let i = 0; i < this.paramTypes.length; i++) {
       this.paramTypes[i].encode(encoder, args[i]);
     }
 
-    // Send to Rust and get response
+    // Send to Rust and get response (Rust may call back to JS during this)
     const response = sync_request_binary("wry://handler", encoder.finalize());
     const result = handleBinaryResponse(response)!;
+
+    // Pop the borrow frame - clears borrowed refs from this call
+    window.jsHeap.popBorrowFrame();
+
     // Decode return value
     return this.returnType.decode(result);
   }
