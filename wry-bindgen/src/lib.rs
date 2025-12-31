@@ -812,8 +812,16 @@ impl<T, E: core::fmt::Debug> UnwrapThrowExt<T> for Result<T, E> {
     }
 }
 
+#[cold]
+#[inline(never)]
 pub fn throw_str(message: &str) -> ! {
     panic!("{}", message);
+}
+
+#[cold]
+#[inline(never)]
+pub fn throw_val(s: JsValue) -> ! {
+    panic!("{:?}", s);
 }
 
 /// Prelude module for common imports

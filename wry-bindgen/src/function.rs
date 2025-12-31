@@ -191,11 +191,11 @@ impl ObjEncoder {
 }
 
 thread_local! {
-    pub(crate) static THREAD_LOCAL_FUNCTION_ENCODER: RefCell<ObjEncoder> = RefCell::new(ObjEncoder::new());
+    pub(crate) static THREAD_LOCAL_OBJECT_ENCODER: RefCell<ObjEncoder> = RefCell::new(ObjEncoder::new());
 }
 
 /// Register a callback with the thread-local encoder using a short borrow
 pub(crate) fn register_value(callback: RustCallback) -> DefaultKey {
-    THREAD_LOCAL_FUNCTION_ENCODER
+    THREAD_LOCAL_OBJECT_ENCODER
         .with(|fn_encoder| fn_encoder.borrow_mut().register_value(callback))
 }

@@ -12,7 +12,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use slotmap::{DefaultKey, KeyData};
 
 use crate::encode::BinaryDecode;
-use crate::function::{CALL_EXPORT_FN_ID, DROP_NATIVE_REF_FN_ID, RustCallback, THREAD_LOCAL_FUNCTION_ENCODER};
+use crate::function::{CALL_EXPORT_FN_ID, DROP_NATIVE_REF_FN_ID, RustCallback, THREAD_LOCAL_OBJECT_ENCODER};
 use crate::ipc::{DecodedData, DecodedVariant, IPCMessage};
 
 /// Application-level events that can be sent through the event loop.
@@ -151,7 +151,7 @@ fn handle_rust_callback(runtime: &WryRuntime, data: &mut DecodedData) {
             let key = KeyData::from_ffi(data.take_u64().unwrap()).into();
 
             // Get the function from the thread-local encoder
-            let function = THREAD_LOCAL_FUNCTION_ENCODER.with(|fn_encoder| {
+            let function = THREAD_LOCAL_OBJECT_ENCODER.with(|fn_encoder| {
                 fn_encoder
                     .borrow_mut()
                     .functions
@@ -178,7 +178,7 @@ fn handle_rust_callback(runtime: &WryRuntime, data: &mut DecodedData) {
                 runtime.js_response(response);
 
                 // Insert it back into the thread-local encoder
-                THREAD_LOCAL_FUNCTION_ENCODER.with(|fn_encoder| {
+                THREAD_LOCAL_OBJECT_ENCODER.with(|fn_encoder| {
                     fn_encoder
                         .borrow_mut()
                         .functions
@@ -195,7 +195,7 @@ fn handle_rust_callback(runtime: &WryRuntime, data: &mut DecodedData) {
             let key: DefaultKey = KeyData::from_ffi(data.take_u64().unwrap()).into();
 
             // Remove the object from the thread-local encoder
-            THREAD_LOCAL_FUNCTION_ENCODER.with(|fn_encoder| {
+            THREAD_LOCAL_OBJECT_ENCODER.with(|fn_encoder| {
                 fn_encoder.borrow_mut().functions.remove(key);
             });
 
