@@ -9,7 +9,9 @@ fn main() {
 }
 
 fn app() {
-    launch(|| rsx!{
-        div { "Hello, world!" }
+    launch(|| {
+        rsx! {
+            div { "Hello, world!" }
+        }
     })
 }

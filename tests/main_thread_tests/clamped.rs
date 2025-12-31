@@ -47,7 +47,11 @@ pub(crate) fn test_clamped_js_clamping_behavior() {
     }
 
     let result = test_clamping();
-    assert_eq!(result, vec![0, 255, 128], "Uint8ClampedArray should clamp values to 0-255 range");
+    assert_eq!(
+        result,
+        vec![0, 255, 128],
+        "Uint8ClampedArray should clamp values to 0-255 range"
+    );
 }
 
 /// Test sending and receiving Clamped data preserves values

@@ -9,13 +9,13 @@ use alloc::vec::Vec;
 use core::marker::PhantomData;
 use slotmap::Key;
 
+use crate::Closure;
 use crate::WasmClosureFnOnce;
 use crate::batch::{BATCH_STATE, BatchState};
+use crate::convert::RefFromBinaryDecode;
 use crate::function::{RustCallback, register_value};
 use crate::ipc::{DecodeError, DecodedData, EncodedData};
 use crate::value::JsValue;
-use crate::convert::RefFromBinaryDecode;
-use crate::Closure;
 
 /// Trait for encoding Rust values into the binary protocol.
 /// Each type specifies how to serialize itself.

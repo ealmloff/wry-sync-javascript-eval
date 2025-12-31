@@ -73,9 +73,9 @@ impl IntoWasmAbi for Option<JsValue> {
     }
 }
 
-use crate::ipc::{DecodeError, DecodedData};
-use crate::encode::BinaryDecode;
 use crate::JsCast;
+use crate::encode::BinaryDecode;
+use crate::ipc::{DecodeError, DecodedData};
 use core::marker::PhantomData;
 
 /// Trait for types that can be decoded as references from binary data.

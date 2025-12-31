@@ -75,9 +75,7 @@ pub mod __rt {
 }
 
 macro_rules! cast {
-    (($from:ty => $to:ty) $val:expr) => {{
-        $crate::__rt::wbg_cast::<$from, $to>($val)
-    }};
+    (($from:ty => $to:ty) $val:expr) => {{ $crate::__rt::wbg_cast::<$from, $to>($val) }};
 }
 
 macro_rules! to_js_value {
@@ -520,8 +518,7 @@ impl FunctionRegistry {
     }
 
     /// Get a function by name from the registry
-    pub fn get_function<F>(&self, spec: JsFunctionSpec) -> Option<JSFunction<F>>
-    {
+    pub fn get_function<F>(&self, spec: JsFunctionSpec) -> Option<JSFunction<F>> {
         let index = self
             .function_specs
             .iter()

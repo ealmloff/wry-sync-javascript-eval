@@ -29,5 +29,8 @@ pub(crate) fn test_thread_local_window() {
     let window = window.expect("Expected window to be Some");
     assert!(window.is_object(), "Expected window to be an object");
     let as_js_value: &JsValue = window.as_ref();
-    assert!(as_js_value.clone().dyn_into::<Window>().is_ok(), "Expected window to be a Window instance");
+    assert!(
+        as_js_value.clone().dyn_into::<Window>().is_ok(),
+        "Expected window to be a Window instance"
+    );
 }

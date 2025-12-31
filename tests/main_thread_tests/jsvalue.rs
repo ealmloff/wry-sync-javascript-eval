@@ -363,31 +363,61 @@ pub(crate) fn test_instanceof_basic() {
     // Array instanceof checks
     let arr = create_array();
     assert!(arr.has_type::<Array>(), "Array should be instanceof Array");
-    assert!(!arr.has_type::<Date>(), "Array should not be instanceof Date");
-    assert!(!arr.has_type::<Error>(), "Array should not be instanceof Error");
+    assert!(
+        !arr.has_type::<Date>(),
+        "Array should not be instanceof Date"
+    );
+    assert!(
+        !arr.has_type::<Error>(),
+        "Array should not be instanceof Error"
+    );
 
     // Date instanceof checks
     let date = create_date();
     assert!(date.has_type::<Date>(), "Date should be instanceof Date");
-    assert!(!date.has_type::<Array>(), "Date should not be instanceof Array");
+    assert!(
+        !date.has_type::<Array>(),
+        "Date should not be instanceof Array"
+    );
 
     // Error instanceof checks
     let error = create_error();
-    assert!(error.has_type::<Error>(), "Error should be instanceof Error");
-    assert!(!error.has_type::<Array>(), "Error should not be instanceof Array");
+    assert!(
+        error.has_type::<Error>(),
+        "Error should be instanceof Error"
+    );
+    assert!(
+        !error.has_type::<Array>(),
+        "Error should not be instanceof Array"
+    );
 
     // Plain object should not be instanceof Array/Date/Error
     let obj = create_object();
-    assert!(!obj.has_type::<Array>(), "Object should not be instanceof Array");
-    assert!(!obj.has_type::<Date>(), "Object should not be instanceof Date");
-    assert!(!obj.has_type::<Error>(), "Object should not be instanceof Error");
+    assert!(
+        !obj.has_type::<Array>(),
+        "Object should not be instanceof Array"
+    );
+    assert!(
+        !obj.has_type::<Date>(),
+        "Object should not be instanceof Date"
+    );
+    assert!(
+        !obj.has_type::<Error>(),
+        "Object should not be instanceof Error"
+    );
 
     // Primitives should not be instanceof any class
     let num = create_number();
-    assert!(!num.has_type::<Array>(), "Number should not be instanceof Array");
+    assert!(
+        !num.has_type::<Array>(),
+        "Number should not be instanceof Array"
+    );
 
     let str_val = create_string();
-    assert!(!str_val.has_type::<Array>(), "String should not be instanceof Array");
+    assert!(
+        !str_val.has_type::<Array>(),
+        "String should not be instanceof Array"
+    );
 }
 
 pub(crate) fn test_instanceof_is_instance_of() {
@@ -410,7 +440,10 @@ pub(crate) fn test_instanceof_is_instance_of() {
 
     // Test is_instance_of (same as has_type but different API)
     assert!(arr.is_instance_of::<Array>(), "Array is_instance_of Array");
-    assert!(!obj.is_instance_of::<Array>(), "Object is not instance_of Array");
+    assert!(
+        !obj.is_instance_of::<Array>(),
+        "Object is not instance_of Array"
+    );
 }
 
 pub(crate) fn test_instanceof_dyn_into() {

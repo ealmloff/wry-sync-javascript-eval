@@ -324,9 +324,10 @@ fn parse_struct(s: syn::ItemStruct, attrs: &BindgenAttrs) -> syn::Result<ExportS
                     continue;
                 }
 
-                let field_name = field.ident.clone().ok_or_else(|| {
-                    syn::Error::new_spanned(field, "struct fields must be named")
-                })?;
+                let field_name = field
+                    .ident
+                    .clone()
+                    .ok_or_else(|| syn::Error::new_spanned(field, "struct fields must be named"))?;
 
                 let js_field_name = field_attrs
                     .js_name()

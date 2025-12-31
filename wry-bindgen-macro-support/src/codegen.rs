@@ -6,8 +6,8 @@
 use std::hash::{BuildHasher, Hash, Hasher, RandomState};
 
 use crate::ast::{
-    ExportMethod, ExportMethodKind, ExportStruct, ImportFunction, ImportFunctionKind,
-    ImportStatic, ImportType, Program, SelfType, StringEnum, StructField,
+    ExportMethod, ExportMethodKind, ExportStruct, ImportFunction, ImportFunctionKind, ImportStatic,
+    ImportType, Program, SelfType, StringEnum, StructField,
 };
 use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote, quote_spanned};
@@ -697,7 +697,11 @@ fn extract_type_name(ty: &syn::Type) -> syn::Result<&syn::Ident> {
 }
 
 /// Generate code for an imported static
-fn generate_static(st: &ImportStatic, krate: &TokenStream, prefix: &str) -> syn::Result<TokenStream> {
+fn generate_static(
+    st: &ImportStatic,
+    krate: &TokenStream,
+    prefix: &str,
+) -> syn::Result<TokenStream> {
     let vis = &st.vis;
     let rust_name = &st.rust_name;
     let ty = &st.ty;
@@ -1258,9 +1262,11 @@ fn generate_export_method(method: &ExportMethod, krate: &TokenStream) -> syn::Re
         }
         ExportMethodKind::Setter { property: _ } => {
             // Property setter: call the setter method
-            let arg_ty = method.arguments.first().map(|a| &a.ty).ok_or_else(|| {
-                syn::Error::new(span, "setter must have an argument")
-            })?;
+            let arg_ty = method
+                .arguments
+                .first()
+                .map(|a| &a.ty)
+                .ok_or_else(|| syn::Error::new(span, "setter must have an argument"))?;
             let arg_name = method.arguments.first().map(|a| &a.name).unwrap();
 
             quote_spanned! {span=>

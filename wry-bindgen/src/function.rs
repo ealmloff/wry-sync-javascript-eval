@@ -4,11 +4,11 @@
 //! and for registering Rust callbacks that can be called from JavaScript.
 
 use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::any::Any;
 use core::cell::{Cell, RefCell};
 use core::marker::PhantomData;
-use alloc::collections::BTreeMap;
 
 use slotmap::{DefaultKey, SlotMap};
 

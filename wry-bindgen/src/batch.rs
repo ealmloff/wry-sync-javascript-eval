@@ -3,8 +3,8 @@
 //! This module provides the batching infrastructure that allows multiple
 //! JS operations to be grouped together for efficient execution.
 
-use core::cell::RefCell;
 use alloc::vec::Vec;
+use core::cell::RefCell;
 
 use crate::encode::{BatchableResult, BinaryDecode};
 use crate::ipc::{EncodedData, IPCMessage, MessageType};

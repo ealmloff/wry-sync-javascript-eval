@@ -309,4 +309,3 @@ fn not_found_response() -> wry::http::Response<Vec<u8>> {
         .body(b"Not Found".to_vec())
         .expect("Failed to build not found response")
 }
-

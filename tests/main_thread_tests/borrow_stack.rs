@@ -76,8 +76,8 @@ pub(crate) fn test_borrowed_ref_in_callback_with_return() {
 /// 3. Rust callback calls JS with borrowed ref to `innermost_obj`
 /// 4. Inner calls return, but `outer_obj` ref should still be valid
 pub(crate) fn test_borrowed_ref_nested_frames() {
-    use wasm_bindgen::Closure;
     use std::cell::Cell;
+    use wasm_bindgen::Closure;
 
     #[wasm_bindgen(inline_js = r#"
         export function call_with_refs(outer_ref, callback) {
@@ -131,18 +131,22 @@ pub(crate) fn test_borrowed_ref_nested_frames() {
         let callback_was_called = callback_was_called.clone();
         let innermost_check_passed = innermost_check_passed.clone();
         move |inner_ref: &JsValue| {
-        callback_was_called.set(true);
+            callback_was_called.set(true);
 
-        // Verify the inner_ref is valid
-        assert!(!inner_ref.is_undefined(), "inner_ref should not be undefined");
-        assert!(!inner_ref.is_null(), "inner_ref should not be null");
+            // Verify the inner_ref is valid
+            assert!(
+                !inner_ref.is_undefined(),
+                "inner_ref should not be undefined"
+            );
+            assert!(!inner_ref.is_null(), "inner_ref should not be null");
 
-        // Now call another JS function with yet another borrowed ref (innermost)
-        // This creates a third level of nesting
-        let check_result = check_ref(&innermost_for_closure);
-        innermost_check_passed.set(check_result);
+            // Now call another JS function with yet another borrowed ref (innermost)
+            // This creates a third level of nesting
+            let check_result = check_ref(&innermost_for_closure);
+            innermost_check_passed.set(check_result);
 
-        check_result}
+            check_result
+        }
     });
 
     // Call JS with outer_obj as borrowed ref
@@ -151,10 +155,16 @@ pub(crate) fn test_borrowed_ref_nested_frames() {
     let result = call_with_refs(&outer_obj, callback);
 
     // Verify callback was called
-    assert!(callback_was_called.get(), "Callback should have been called");
+    assert!(
+        callback_was_called.get(),
+        "Callback should have been called"
+    );
 
     // Verify innermost check passed
-    assert!(innermost_check_passed.get(), "Innermost ref check should have passed");
+    assert!(
+        innermost_check_passed.get(),
+        "Innermost ref check should have passed"
+    );
 
     // Verify the result from JS
     let outer_value = get_result_field(&result, "outer_value");
@@ -227,39 +237,77 @@ pub(crate) fn test_borrowed_ref_deep_nesting() {
     let obj1 = make_level1();
 
     // Create nested callbacks - each level calls the next
-    let cb3 = Closure::new(Box::new(|ref4: &JsValue| -> JsValue {
-        level4(ref4)
-    }) as Box<dyn FnMut(&JsValue) -> JsValue>);
+    let cb3 = Closure::new(Box::new(|ref4: &JsValue| -> JsValue { level4(ref4) })
+        as Box<dyn FnMut(&JsValue) -> JsValue>);
 
     let cb2 = Closure::new(Box::new(move |ref3: &JsValue| -> JsValue {
-        level3(ref3, Closure::new(Box::new(|ref4: &JsValue| -> JsValue {
-            level4(ref4)
-        }) as Box<dyn FnMut(&JsValue) -> JsValue>))
+        level3(
+            ref3,
+            Closure::new(Box::new(|ref4: &JsValue| -> JsValue { level4(ref4) })
+                as Box<dyn FnMut(&JsValue) -> JsValue>),
+        )
     }) as Box<dyn FnMut(&JsValue) -> JsValue>);
 
     let cb1 = Closure::new(Box::new(move |ref2: &JsValue| -> JsValue {
-        level2(ref2, Closure::new(Box::new(move |ref3: &JsValue| -> JsValue {
-            level3(ref3, Closure::new(Box::new(|ref4: &JsValue| -> JsValue {
-                level4(ref4)
-            }) as Box<dyn FnMut(&JsValue) -> JsValue>))
-        }) as Box<dyn FnMut(&JsValue) -> JsValue>))
+        level2(
+            ref2,
+            Closure::new(Box::new(move |ref3: &JsValue| -> JsValue {
+                level3(
+                    ref3,
+                    Closure::new(Box::new(|ref4: &JsValue| -> JsValue { level4(ref4) })
+                        as Box<dyn FnMut(&JsValue) -> JsValue>),
+                )
+            }) as Box<dyn FnMut(&JsValue) -> JsValue>),
+        )
     }) as Box<dyn FnMut(&JsValue) -> JsValue>);
 
     let result = level1(&obj1, cb1);
 
     // Verify all levels saw their correct values
-    assert_eq!(extract(&result, "v1").as_f64(), Some(1.0), "Level 1 should see value 1");
-    assert_eq!(extract(&result, "valid1").as_bool(), Some(true), "Level 1 ref should remain valid");
+    assert_eq!(
+        extract(&result, "v1").as_f64(),
+        Some(1.0),
+        "Level 1 should see value 1"
+    );
+    assert_eq!(
+        extract(&result, "valid1").as_bool(),
+        Some(true),
+        "Level 1 ref should remain valid"
+    );
 
     let result2 = extract(&result, "result2");
-    assert_eq!(extract(&result2, "v2").as_f64(), Some(2.0), "Level 2 should see value 2");
-    assert_eq!(extract(&result2, "valid2").as_bool(), Some(true), "Level 2 ref should remain valid");
+    assert_eq!(
+        extract(&result2, "v2").as_f64(),
+        Some(2.0),
+        "Level 2 should see value 2"
+    );
+    assert_eq!(
+        extract(&result2, "valid2").as_bool(),
+        Some(true),
+        "Level 2 ref should remain valid"
+    );
 
     let result3 = extract(&result2, "result3");
-    assert_eq!(extract(&result3, "v3").as_f64(), Some(3.0), "Level 3 should see value 3");
-    assert_eq!(extract(&result3, "valid3").as_bool(), Some(true), "Level 3 ref should remain valid");
+    assert_eq!(
+        extract(&result3, "v3").as_f64(),
+        Some(3.0),
+        "Level 3 should see value 3"
+    );
+    assert_eq!(
+        extract(&result3, "valid3").as_bool(),
+        Some(true),
+        "Level 3 ref should remain valid"
+    );
 
     let result4 = extract(&result3, "result4");
-    assert_eq!(extract(&result4, "v4").as_f64(), Some(4.0), "Level 4 should see value 4");
-    assert_eq!(extract(&result4, "valid4").as_bool(), Some(true), "Level 4 ref should be valid");
+    assert_eq!(
+        extract(&result4, "v4").as_f64(),
+        Some(4.0),
+        "Level 4 should see value 4"
+    );
+    assert_eq!(
+        extract(&result4, "valid4").as_bool(),
+        Some(true),
+        "Level 4 ref should be valid"
+    );
 }
