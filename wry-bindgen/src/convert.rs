@@ -126,3 +126,51 @@ impl IntoWasmAbi for Option<JsValue> {
         }
     }
 }
+
+use crate::ipc::{DecodeError, DecodedData};
+use crate::encode::BinaryDecode;
+use crate::JsCast;
+use core::marker::PhantomData;
+
+/// Trait for types that can be decoded as references from binary data.
+///
+/// This is the wry-bindgen equivalent of wasm-bindgen's `RefFromWasmAbi`.
+/// The `Anchor` type holds the decoded value and keeps the reference valid
+/// during callback invocation.
+pub trait RefFromBinaryDecode {
+    /// The anchor type that keeps the decoded reference valid.
+    type Anchor: core::ops::Deref<Target = Self>;
+
+    /// Decode a reference anchor from binary data.
+    fn ref_decode(decoder: &mut DecodedData) -> Result<Self::Anchor, DecodeError>;
+}
+
+/// Anchor type for JsCast references.
+///
+/// This holds a `JsValue` and provides a reference to the target type `T`
+/// through the `JsCast` trait.
+pub struct JsCastAnchor<T: JsCast> {
+    value: JsValue,
+    _marker: PhantomData<T>,
+}
+
+impl<T: JsCast> core::ops::Deref for JsCastAnchor<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        T::unchecked_from_js_ref(&self.value)
+    }
+}
+
+// Blanket implementation for all JsCast types (including JsValue)
+impl<T: JsCast + 'static> RefFromBinaryDecode for T {
+    type Anchor = JsCastAnchor<T>;
+
+    fn ref_decode(decoder: &mut DecodedData) -> Result<Self::Anchor, DecodeError> {
+        let value = <JsValue as BinaryDecode>::decode(decoder)?;
+        Ok(JsCastAnchor {
+            value,
+            _marker: PhantomData,
+        })
+    }
+}
