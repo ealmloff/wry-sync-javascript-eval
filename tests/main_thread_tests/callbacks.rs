@@ -1,6 +1,5 @@
 use futures_util::StreamExt;
-use pollster::FutureExt;
-use wasm_bindgen::{Closure, runtime::wait_for_js_event, wasm_bindgen};
+use wasm_bindgen::{Closure, wasm_bindgen};
 
 pub(crate) fn test_call_callback() {
     #[wasm_bindgen(inline_js = "export function calls_callback(cb, value) { return cb(value); }")]
