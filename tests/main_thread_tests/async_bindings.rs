@@ -1,4 +1,3 @@
-use pollster::FutureExt;
 use wasm_bindgen::wasm_bindgen;
 use wry_testing::JsValue;
 
