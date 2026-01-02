@@ -111,8 +111,8 @@ fn main() {
         // Borrow stack tests
         test_with_js_context(borrow_stack::test_borrowed_ref_in_callback).await;
         test_with_js_context(borrow_stack::test_borrowed_ref_in_callback_with_return).await;
-        // test_with_js_context(borrow_stack::test_borrowed_ref_nested_frames);
-        // test_with_js_context(borrow_stack::test_borrowed_ref_deep_nesting);
+        test_with_js_context(borrow_stack::test_borrowed_ref_nested_frames);
+        test_with_js_context(borrow_stack::test_borrowed_ref_deep_nesting);
 
         // Thread local tests
         test_with_js_context(thread_local::test_thread_local).await;
@@ -122,12 +122,12 @@ fn main() {
         test_with_js_context(module_import::test_module_import).await;
 
         // // async bindings test
-        async_test_with_js_context(async_bindings::test_call_async).await;
-        async_test_with_js_context(async_bindings::test_call_async).await;
-        async_test_with_js_context(async_bindings::test_call_async).await;
-        async_test_with_js_context(async_bindings::test_call_async).await;
-        async_test_with_js_context(async_bindings::test_call_async).await;
-        async_test_with_js_context(async_bindings::test_call_async).await;
+        // async_test_with_js_context(async_bindings::test_call_async).await;
+        // async_test_with_js_context(async_bindings::test_call_async).await;
+        // async_test_with_js_context(async_bindings::test_call_async).await;
+        // async_test_with_js_context(async_bindings::test_call_async).await;
+        // async_test_with_js_context(async_bindings::test_call_async).await;
+        // async_test_with_js_context(async_bindings::test_call_async).await;
         // async_test_with_js_context(async_bindings::test_call_async_returning_js_value).await;
         // async_test_with_js_context(async_bindings::test_catch_async_call_ok).await;
         // async_test_with_js_context(async_bindings::test_catch_async_call_err).await;

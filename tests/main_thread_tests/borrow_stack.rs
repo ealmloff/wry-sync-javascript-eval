@@ -237,17 +237,6 @@ pub(crate) fn test_borrowed_ref_deep_nesting() {
     let obj1 = make_level1();
 
     // Create nested callbacks - each level calls the next
-    let cb3 = Closure::new(Box::new(|ref4: &JsValue| -> JsValue { level4(ref4) })
-        as Box<dyn FnMut(&JsValue) -> JsValue>);
-
-    let cb2 = Closure::new(Box::new(move |ref3: &JsValue| -> JsValue {
-        level3(
-            ref3,
-            Closure::new(Box::new(|ref4: &JsValue| -> JsValue { level4(ref4) })
-                as Box<dyn FnMut(&JsValue) -> JsValue>),
-        )
-    }) as Box<dyn FnMut(&JsValue) -> JsValue>);
-
     let cb1 = Closure::new(Box::new(move |ref2: &JsValue| -> JsValue {
         level2(
             ref2,
