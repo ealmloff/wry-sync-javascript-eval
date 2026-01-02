@@ -1,9 +1,8 @@
 use dioxus::prelude::*;
 
 fn main() {
-    wry_testing::run(|| {
+    wry_testing::run(|| async {
         app();
-        wait_for_js_result::<i32>();
     })
     .unwrap();
 }

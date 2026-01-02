@@ -2,9 +2,8 @@ use wry_testing::wait_for_js_result;
 use yew::prelude::*;
 
 pub fn main() {
-    wry_testing::run(|| {
+    wry_testing::run(|| async {
         app();
-        wait_for_js_result::<i32>();
     })
     .unwrap();
 }

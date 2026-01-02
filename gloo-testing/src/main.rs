@@ -5,9 +5,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 
 pub fn main() {
-    wry_testing::run(|| {
+    wry_testing::run(|| async {
         app();
-        wait_for_js_result::<i32>();
     })
     .unwrap();
 }

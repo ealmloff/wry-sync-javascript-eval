@@ -46,7 +46,6 @@ pub(crate) async fn test_call_async_returning_js_value() {
     assert_eq!(result.as_f64().unwrap() as u32, 5);
 }
 
-
 pub(crate) async fn test_catch_async_call_ok() {
     #[wasm_bindgen(inline_js = "export async function identity(value) {
         return new Promise((resolve) => {
@@ -65,7 +64,6 @@ pub(crate) async fn test_catch_async_call_ok() {
     assert_eq!(result.as_string().unwrap(), "Hello, world!");
 }
 
-
 pub(crate) async fn test_catch_async_call_err() {
     #[wasm_bindgen(inline_js = "export async function throw_value(error) {
         return new Promise((resolve, reject) => {
@@ -78,12 +76,97 @@ pub(crate) async fn test_catch_async_call_err() {
         #[wasm_bindgen(catch)]
         async fn throw_value(error: &str) -> Result<(), JsValue>;
     }
-    
+
     println!("Testing async function that throws an error...");
     let result = throw_value("Test error").await;
     let err = result.err().unwrap();
     assert_eq!(err.as_string().unwrap(), "Test error");
-
 }
 
+pub(crate) async fn test_async_method() {
+    #[wasm_bindgen(inline_js = "export class AsyncCalculator {
+        constructor(base) {
+            this.base = base;
+        }
+        async addAfterDelay(value) {
+            return new Promise((resolve) => {
+                setTimeout(() => {
+                    resolve(this.base + value);
+                }, 100);
+            });
+        }
+    }")]
+    extern "C" {
+        type AsyncCalculator;
 
+        #[wasm_bindgen(constructor)]
+        fn new(base: u32) -> AsyncCalculator;
+
+        #[wasm_bindgen(method)]
+        async fn addAfterDelay(this: &AsyncCalculator, value: u32) -> JsValue;
+    }
+
+    let calc = AsyncCalculator::new(10);
+    let result = calc.addAfterDelay(5).await;
+    assert_eq!(result.as_f64().unwrap() as u32, 15);
+}
+
+pub(crate) async fn test_async_method_with_catch() {
+    #[wasm_bindgen(inline_js = "export class AsyncValidator {
+        constructor(shouldFail) {
+            this.shouldFail = shouldFail;
+        }
+        async validate(value) {
+            return new Promise((resolve, reject) => {
+                setTimeout(() => {
+                    if (this.shouldFail) {
+                        reject('Validation failed: ' + value);
+                    } else {
+                        resolve('Valid: ' + value);
+                    }
+                }, 100);
+            });
+        }
+    }")]
+    extern "C" {
+        type AsyncValidator;
+
+        #[wasm_bindgen(constructor)]
+        fn new(shouldFail: bool) -> AsyncValidator;
+
+        #[wasm_bindgen(method, catch)]
+        async fn validate(this: &AsyncValidator, value: &str) -> Result<JsValue, JsValue>;
+    }
+
+    // Test successful validation
+    let validator_ok = AsyncValidator::new(false);
+    let result = validator_ok.validate("test").await.unwrap();
+    assert_eq!(result.as_string().unwrap(), "Valid: test");
+
+    // Test failed validation
+    let validator_fail = AsyncValidator::new(true);
+    let result = validator_fail.validate("test").await;
+    let err = result.err().unwrap();
+    assert_eq!(err.as_string().unwrap(), "Validation failed: test");
+}
+
+pub(crate) async fn test_async_static_method() {
+    #[wasm_bindgen(inline_js = "export class AsyncUtils {
+        static async fetchData(key) {
+            return new Promise((resolve) => {
+                setTimeout(() => {
+                    resolve('data_for_' + key);
+                }, 100);
+            });
+        }
+    }")]
+    extern "C" {
+        type AsyncUtils;
+
+        #[wasm_bindgen(static_method_of = AsyncUtils)]
+        async fn fetchData(key: &str) -> JsValue;
+    }
+
+    let result = AsyncUtils::fetchData("test_key").await;
+    assert_eq!(result.as_string().unwrap(), "data_for_test_key");
+}

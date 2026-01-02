@@ -385,14 +385,17 @@ fn generate_function(
         None => quote_spanned! {span=> () },
     };
 
-    // For non-inline_js, generate a simple closure that returns a constant string
-    let js_code = generate_js_code(func, vendor_prefixes, prefix);
-    let js_code_str = js_code.to_arrow_function();
-
     // Handle async functions - generate code that uses JsFuture
+    // For async functions with catch, skip the try-catch wrapper since JsFuture already returns Result
     if func.is_async {
+        let js_code = generate_js_code(func, vendor_prefixes, prefix, true);
+        let js_code_str = js_code.to_arrow_function();
         return generate_async_function(func, krate, &registry_name, &js_code_str, &args);
     }
+
+    // For non-async functions, generate a simple closure that returns a constant string
+    let js_code = generate_js_code(func, vendor_prefixes, prefix, false);
+    let js_code_str = js_code.to_arrow_function();
 
     // Generate the function body
     let func_body = quote_spanned! {span=>
@@ -581,7 +584,7 @@ fn generate_async_function(
         ),
     };
 
-    // Generate the async function - only Normal kind for now (simplest case)
+    // Generate the async function based on kind
     match &func.kind {
         ImportFunctionKind::Normal => {
             Ok(quote_spanned! {span=>
@@ -591,12 +594,49 @@ fn generate_async_function(
                 }
             })
         }
-        _ => {
-            // For other kinds (methods, constructors, etc.), fall back to error for now
-            Err(syn::Error::new(
-                span,
-                "async is only supported for normal functions currently",
-            ))
+        ImportFunctionKind::Method { receiver }
+        | ImportFunctionKind::Getter { receiver, .. }
+        | ImportFunctionKind::Setter { receiver, .. } => {
+            // Extract the type name from the receiver
+            let receiver_type = extract_type_name(receiver)?;
+
+            // Build method signature with optional additional args
+            let method_args = if fn_params.is_empty() {
+                quote_spanned! {span=> &self }
+            } else {
+                quote_spanned! {span=> &self, #fn_params }
+            };
+
+            Ok(quote_spanned! {span=>
+                impl #receiver_type {
+                    #(#rust_attrs)*
+                    #vis async fn #rust_name(#method_args) #ret_clause {
+                        #async_body #ret_handling
+                    }
+                }
+            })
+        }
+        ImportFunctionKind::Constructor { class } => {
+            let class_ident = format_ident!("{}", class);
+            Ok(quote_spanned! {span=>
+                impl #class_ident {
+                    #(#rust_attrs)*
+                    #vis async fn #rust_name(#fn_params) #ret_clause {
+                        #async_body #ret_handling
+                    }
+                }
+            })
+        }
+        ImportFunctionKind::StaticMethod { class } => {
+            let class_ident = format_ident!("{}", class);
+            Ok(quote_spanned! {span=>
+                impl #class_ident {
+                    #(#rust_attrs)*
+                    #vis async fn #rust_name(#fn_params) #ret_clause {
+                        #async_body #ret_handling
+                    }
+                }
+            })
         }
     }
 }
@@ -635,6 +675,7 @@ fn generate_js_code(
     func: &ImportFunction,
     vendor_prefixes: &std::collections::HashMap<String, Vec<String>>,
     prefix: &str,
+    skip_catch_wrapper: bool,
 ) -> JsCode {
     let js_name = &func.js_name;
 
@@ -719,7 +760,8 @@ fn generate_js_code(
     };
 
     // Wrap in try-catch if catch attribute is present
-    let body = if func.catch {
+    // Skip for async functions since JsFuture already returns Result<JsValue, JsValue>
+    let body = if func.catch && !skip_catch_wrapper {
         wrap_body_with_try_catch(&body)
     } else {
         body
