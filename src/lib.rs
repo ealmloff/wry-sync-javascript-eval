@@ -3,6 +3,7 @@
 //! This library provides the infrastructure for launching a webview with
 //! Rust-JavaScript bindings via the wry-bindgen macro system.
 
+use futures_util::FutureExt;
 use wasm_bindgen::runtime::progress_js_with;
 use winit::event_loop::EventLoop;
 
@@ -132,7 +133,10 @@ where
             };
 
             pollster::block_on(async move {
-                futures_util::join!(run_app, wait_for_events);
+                futures_util::select! {
+                    _ = run_app.fuse() => {},
+                    _ = wait_for_events.fuse() => {},
+                }
             });
         };
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run));
