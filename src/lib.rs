@@ -3,6 +3,7 @@
 //! This library provides the infrastructure for launching a webview with
 //! Rust-JavaScript bindings via the wry-bindgen macro system.
 
+use wasm_bindgen::runtime::progress_js_with;
 use winit::event_loop::EventLoop;
 
 use wasm_bindgen::{FUNCTION_REGISTRY, FunctionRegistry};
@@ -46,9 +47,10 @@ pub use wasm_bindgen::prelude::{
 ///     wait_for_js_event::<()>();
 /// }
 /// ```
-pub fn run<F>(app: F) -> wry::Result<()>
+pub fn run<F, Fut>(app: F) -> wry::Result<()>
 where
-    F: FnOnce() + Send + 'static,
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = ()>,
 {
     run_with_config(app, false)
 }
@@ -75,16 +77,18 @@ where
 ///     wait_for_js_event::<()>();
 /// }
 /// ```
-pub fn run_headless<F>(app: F) -> wry::Result<()>
+pub fn run_headless<F, Fut>(app: F) -> wry::Result<()>
 where
-    F: FnOnce() + Send + 'static,
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = ()>,
 {
     run_with_config(app, true)
 }
 
-fn run_with_config<F>(app: F, headless: bool) -> wry::Result<()>
+fn run_with_config<F, Fut>(app: F, headless: bool) -> wry::Result<()>
 where
-    F: FnOnce() + Send + 'static,
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = ()>,
 {
     #[cfg(any(
         target_os = "linux",
@@ -119,7 +123,17 @@ where
 
     // Spawn the app thread with panic handling - if the app panics, shut down the webview
     std::thread::spawn(move || {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(app));
+        let run = || {
+            let run_app = app();
+            let wait_for_events = async move {
+                progress_js_with(|_| unreachable!("no response expected from root task")).await;
+            };
+
+            pollster::block_on(async move {
+                futures_util::join!(run_app, wait_for_events);
+            });
+        };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run));
         let status = if let Err(panic_info) = result {
             eprintln!("App thread panicked, shutting down webview");
             // Try to print panic info

@@ -19,6 +19,8 @@ winit = "0.30.12"
 wry = { version = "0.53.5", features = ["devtools"] }
 wasm-bindgen = { path = "wry-bindgen" }
 wasm-bindgen-macro = { package = "wry-bindgen-macro", path = "wry-bindgen-macro" }
+futures-util = "0.3.31"
+pollster = "0.4.0"
 
 [build-dependencies]
 lazy-js-bundle = { git = "https://github.com/DioxusLabs/dioxus" }
@@ -27,6 +29,7 @@ lazy-js-bundle = { git = "https://github.com/DioxusLabs/dioxus" }
 web-sys = { path = "wasm-bindgen/crates/web-sys", features = ["CssStyleDeclaration", "Element", "HtmlElement", "Window", "CanvasRenderingContext2d", "Document", "HtmlCanvasElement", "MouseEvent"] }
 wasm-bindgen-futures = { path = "wasm-bindgen/crates/futures" }
 js-sys = { path = "wasm-bindgen/crates/js-sys" }
+pollster = "0.4.0"
 
 [[test]]
 name = "main_thread_tests"

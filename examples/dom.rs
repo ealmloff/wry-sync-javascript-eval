@@ -6,11 +6,8 @@ use web_sys::{Document, HtmlElement};
 use wry_testing::run;
 
 fn main() -> wry::Result<()> {
-    run(|| {
+    run(||async  {
         app();
-
-        // The type here doesn't matter, we just want to wait forever.
-        _ = wait_for_js_result::<i32>();
     })
 }
 

@@ -112,6 +112,8 @@ pub struct ImportFunction {
     pub structural: bool,
     /// Whether this is variadic
     pub variadic: bool,
+    /// Whether this is an async function
+    pub is_async: bool,
     /// User-provided attributes (like #[cfg(...)] and #[doc = "..."])
     pub rust_attrs: Vec<syn::Attribute>,
 }
@@ -643,6 +645,7 @@ fn extract_wasm_bindgen_attrs(attrs: &[syn::Attribute]) -> syn::Result<BindgenAt
 
 /// Parse a foreign function declaration
 fn parse_foreign_fn(f: syn::ForeignItemFn, attrs: BindgenAttrs) -> syn::Result<ImportFunction> {
+    let is_async = f.sig.asyncness.is_some();
     let rust_name = f.sig.ident.clone();
     let js_name = attrs
         .js_name()
@@ -765,6 +768,7 @@ fn parse_foreign_fn(f: syn::ForeignItemFn, attrs: BindgenAttrs) -> syn::Result<I
         catch: attrs.catch.is_some(),
         structural: attrs.is_structural(),
         variadic: attrs.variadic.is_some(),
+        is_async,
         rust_attrs,
     })
 }

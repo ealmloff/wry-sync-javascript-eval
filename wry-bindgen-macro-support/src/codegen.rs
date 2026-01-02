@@ -389,6 +389,11 @@ fn generate_function(
     let js_code = generate_js_code(func, vendor_prefixes, prefix);
     let js_code_str = js_code.to_arrow_function();
 
+    // Handle async functions - generate code that uses JsFuture
+    if func.is_async {
+        return generate_async_function(func, krate, &registry_name, &js_code_str, &args);
+    }
+
     // Generate the function body
     let func_body = quote_spanned! {span=>
         static __SPEC: #krate::JsFunctionSpec = #krate::JsFunctionSpec::new(
@@ -481,6 +486,117 @@ fn generate_function(
                     }
                 }
             })
+        }
+    }
+}
+
+/// Generate code for an async imported function
+/// Uses wasm_bindgen_futures::JsFuture to convert Promise to Future
+fn generate_async_function(
+    func: &ImportFunction,
+    krate: &TokenStream,
+    registry_name: &str,
+    js_code_str: &str,
+    args: &GeneratedArgs,
+) -> syn::Result<TokenStream> {
+    let vis = &func.vis;
+    let rust_name = &func.rust_name;
+    let span = rust_name.span();
+    let rust_attrs = &func.rust_attrs;
+
+    let fn_params = &args.fn_params;
+    let fn_types = &args.fn_types;
+    let call_values = &args.call_values;
+
+    // Generate the async function body
+    // - Call JS function which returns a Promise (as JsValue)
+    // - Cast to js_sys::Promise
+    // - Wrap in JsFuture and await
+    let async_body = quote_spanned! {span=>
+        static __SPEC: #krate::JsFunctionSpec = #krate::JsFunctionSpec::new(
+            || #krate::alloc::format!(#js_code_str),
+        );
+
+        #krate::inventory::submit! {
+            __SPEC
+        }
+
+        // Look up the function at runtime - returns JsValue (the Promise)
+        let __func: #krate::JSFunction<fn(#fn_types) -> #krate::JsValue> =
+            #krate::FUNCTION_REGISTRY
+                .get_function(__SPEC)
+                .expect(concat!("Function not found: ", #registry_name));
+
+        // Call the function, get Promise as JsValue
+        let __promise_val = __func.call(#call_values);
+
+        // Cast to js_sys::Promise and wrap in JsFuture
+        let __promise: ::wasm_bindgen_futures::js_sys::Promise =
+            #krate::JsCast::unchecked_from_js(__promise_val);
+        ::wasm_bindgen_futures::JsFuture::from(__promise).await
+    };
+
+    // Generate return type handling
+    // JsFuture::from(promise).await returns Result<JsValue, JsValue>
+    // - For Result<T, E> return types: map Ok value, keep Err as JsValue
+    // - For non-Result types: unwrap and cast
+    let (ret_clause, ret_handling) = match &func.ret {
+        Some(ty) => {
+            // Check if return type is Result<T, E>
+            if let Some(ok_type) = extract_result_ok_type(ty) {
+                // Return type is Result<T, E> - map the Ok value
+                if is_unit_type(&ok_type) {
+                    // Result<(), E> - just map to ()
+                    (
+                        quote_spanned! {span=> -> #ty },
+                        quote_spanned! {span=>
+                            .map(|_| ())
+                        },
+                    )
+                } else {
+                    // Result<T, E> - cast the Ok value
+                    (
+                        quote_spanned! {span=> -> #ty },
+                        quote_spanned! {span=>
+                            .map(|v| <#ok_type as #krate::JsCast>::unchecked_from_js(v))
+                        },
+                    )
+                }
+            } else {
+                // Non-Result type - unwrap and cast
+                (
+                    quote_spanned! {span=> -> #ty },
+                    quote_spanned! {span=>
+                        .map(|v| <#ty as #krate::JsCast>::unchecked_from_js(v))
+                        .expect("async function failed")
+                    },
+                )
+            }
+        }
+        None => (
+            quote_spanned! {span=> },
+            quote_spanned! {span=>
+                .expect("async function failed");
+            },
+        ),
+    };
+
+    // Generate the async function - only Normal kind for now (simplest case)
+    match &func.kind {
+        ImportFunctionKind::Normal => {
+            Ok(quote_spanned! {span=>
+                #(#rust_attrs)*
+                #vis async fn #rust_name(#fn_params) #ret_clause {
+                    #async_body #ret_handling
+                }
+            })
+        }
+        _ => {
+            // For other kinds (methods, constructors, etc.), fall back to error for now
+            Err(syn::Error::new(
+                span,
+                "async is only supported for normal functions currently",
+            ))
         }
     }
 }
@@ -1552,4 +1668,25 @@ fn generate_export_method(method: &ExportMethod, krate: &TokenStream) -> syn::Re
 
         #js_class_member_spec
     })
+}
+
+/// Extract the Ok type from a Result<T, E> type, or None if not a Result
+fn extract_result_ok_type(ty: &syn::Type) -> Option<syn::Type> {
+    if let syn::Type::Path(type_path) = ty {
+        let segment = type_path.path.segments.last()?;
+        if segment.ident != "Result" {
+            return None;
+        }
+        if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+            if let Some(syn::GenericArgument::Type(ok_ty)) = args.args.first() {
+                return Some(ok_ty.clone());
+            }
+        }
+    }
+    None
+}
+
+/// Check if a type is the unit type ()
+fn is_unit_type(ty: &syn::Type) -> bool {
+    matches!(ty, syn::Type::Tuple(tuple) if tuple.elems.is_empty())
 }
