@@ -837,6 +837,7 @@ macro_rules! impl_closure_ref_encode {
             #[allow(non_snake_case)]
             #[allow(unused)]
             fn encode(self, encoder: &mut EncodedData) {
+                eprintln!("Encoding &mut dyn FnMut callback. This may not be sound");
                 // Decompose fat pointer to (data_ptr, vtable_ptr) to erase the lifetime.
                 // SAFETY: The closure reference must remain valid for the duration of the JS call.
                 // This is safe because JS callbacks are invoked synchronously during the call.
@@ -894,6 +895,7 @@ macro_rules! impl_closure_ref_encode {
             #[allow(non_snake_case)]
             #[allow(unused)]
             fn encode(self, encoder: &mut EncodedData) {
+                eprintln!("Encoding &mut dyn Fn callback. This may not be sound");
                 // Decompose fat pointer to (data_ptr, vtable_ptr) to erase the lifetime.
                 // SAFETY: The closure reference must remain valid for the duration of the JS call.
                 // This is safe because JS callbacks are invoked synchronously during the call.
@@ -951,6 +953,7 @@ macro_rules! impl_closure_ref_encode {
             #[allow(non_snake_case)]
             #[allow(unused)]
             fn encode(self, encoder: &mut EncodedData) {
+                eprintln!("Encoding &mut dyn Fn callback. This may not be sound");
                 // Decompose fat pointer to (data_ptr, vtable_ptr) to erase the lifetime.
                 // SAFETY: The closure reference must remain valid for the duration of the JS call.
                 // This is safe because JS callbacks are invoked synchronously during the call.
