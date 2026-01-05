@@ -3,6 +3,7 @@
 //! This module defines the intermediate representation for parsed wasm_bindgen items.
 
 use crate::parser::BindgenAttrs;
+use quote::quote_spanned;
 use syn::{FnArg, Ident, Pat, Path, ReturnType, Type, Visibility};
 
 /// Extract a simple type name from a Type
@@ -116,6 +117,15 @@ pub struct ImportFunction {
     pub is_async: bool,
     /// User-provided attributes (like #[cfg(...)] and #[doc = "..."])
     pub rust_attrs: Vec<syn::Attribute>,
+}
+
+impl ImportFunction {
+    /// Get the function rust attributes
+    pub fn fn_rust_attrs(&self) -> proc_macro2::TokenStream {
+        let rust_attrs = &self.rust_attrs;
+        let span = self.rust_name.span();
+        quote_spanned! {span=> #(#rust_attrs)* #[allow(non_snake_case)] }
+    }
 }
 
 /// Argument to an imported function
@@ -258,6 +268,15 @@ pub struct ExportMethod {
     pub vis: syn::Visibility,
     /// The original method body
     pub body: syn::Block,
+}
+
+impl ExportMethod {
+    /// Get the function rust attributes
+    pub fn fn_rust_attrs(&self) -> proc_macro2::TokenStream {
+        let rust_attrs = &self.rust_attrs;
+        let span = self.rust_name.span();
+        quote_spanned! {span=> #(#rust_attrs)* #[allow(non_snake_case)] }
+    }
 }
 
 /// Kind of exported method

@@ -421,7 +421,7 @@ fn generate_function(
     };
 
     // Get the rust attributes to forward (like #[cfg(...)] and #[doc = "..."])
-    let rust_attrs = &func.rust_attrs;
+    let rust_attrs = func.fn_rust_attrs();
 
     // Generate the full function based on kind
     match &func.kind {
@@ -433,7 +433,7 @@ fn generate_function(
                     let class_ident = format_ident!("{}", &ns[0]);
                     return Ok(quote_spanned! {span=>
                         impl #class_ident {
-                            #(#rust_attrs)*
+                            #rust_attrs
                             #vis fn #rust_name(#fn_params) -> #ret_type {
                                 #func_body
                             }
@@ -442,7 +442,7 @@ fn generate_function(
                 }
             }
             Ok(quote_spanned! {span=>
-                #(#rust_attrs)*
+                #rust_attrs
                 #vis fn #rust_name(#fn_params) -> #ret_type {
                     #func_body
                 }
@@ -466,7 +466,7 @@ fn generate_function(
 
             Ok(quote_spanned! {span=>
                 impl #receiver_type {
-                    #(#rust_attrs)*
+                    #rust_attrs
                     #vis fn #rust_name(#method_args) -> #ret_type {
                         #func_body
                     }
@@ -478,7 +478,7 @@ fn generate_function(
             // Use the actual return type (may be Result<T, JsValue> for catch constructors)
             Ok(quote_spanned! {span=>
                 impl #class_ident {
-                    #(#rust_attrs)*
+                    #rust_attrs
                     #vis fn #rust_name(#fn_params) -> #ret_type {
                         #func_body
                     }
@@ -489,7 +489,7 @@ fn generate_function(
             let class_ident = format_ident!("{}", class);
             Ok(quote_spanned! {span=>
                 impl #class_ident {
-                    #(#rust_attrs)*
+                    #rust_attrs
                     #vis fn #rust_name(#fn_params) -> #ret_type {
                         #func_body
                     }
@@ -1630,7 +1630,7 @@ fn generate_export_method(method: &ExportMethod, krate: &TokenStream) -> syn::Re
     // Generate the actual impl method
     let vis = &method.vis;
     let body = &method.body;
-    let rust_attrs = &method.rust_attrs;
+    let rust_attrs = method.fn_rust_attrs();
     let arg_names_idents: Vec<_> = method.arguments.iter().map(|a| &a.name).collect();
     let arg_types_refs: Vec<_> = method.arguments.iter().map(|a| &a.ty).collect();
 
@@ -1650,7 +1650,7 @@ fn generate_export_method(method: &ExportMethod, krate: &TokenStream) -> syn::Re
             // No self parameter
             quote_spanned! {span=>
                 impl #class {
-                    #(#rust_attrs)*
+                    #rust_attrs
                     #vis fn #rust_name(#(#fn_args),*) #ret_type #body
                 }
             }
@@ -1668,7 +1668,7 @@ fn generate_export_method(method: &ExportMethod, krate: &TokenStream) -> syn::Re
             };
             quote_spanned! {span=>
                 impl #class {
-                    #(#rust_attrs)*
+                    #rust_attrs
                     #vis fn #rust_name(#fn_args_with_self) #ret_type #body
                 }
             }
@@ -1676,7 +1676,7 @@ fn generate_export_method(method: &ExportMethod, krate: &TokenStream) -> syn::Re
         ExportMethodKind::Getter { .. } => {
             quote_spanned! {span=>
                 impl #class {
-                    #(#rust_attrs)*
+                    #rust_attrs
                     #vis fn #rust_name(&self) #ret_type #body
                 }
             }
@@ -1684,7 +1684,7 @@ fn generate_export_method(method: &ExportMethod, krate: &TokenStream) -> syn::Re
         ExportMethodKind::Setter { .. } => {
             quote_spanned! {span=>
                 impl #class {
-                    #(#rust_attrs)*
+                    #rust_attrs
                     #vis fn #rust_name(&mut self, #(#fn_args),*) #body
                 }
             }
