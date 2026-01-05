@@ -6,6 +6,7 @@
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
+use crate::DecodedData;
 use crate::encode::{BatchableResult, BinaryDecode};
 use crate::ipc::{EncodedData, IPCMessage, MessageType};
 use crate::runtime::get_runtime;
@@ -79,12 +80,6 @@ impl BatchState {
         self.borrow_stack_pointer
     }
 
-    /// Reset the borrow stack after an operation completes.
-    /// This should be called after each operation finishes to clean up borrowed refs.
-    pub fn reset_borrow_stack(&mut self) {
-        self.borrow_stack_pointer = JSIDX_OFFSET;
-    }
-
     /// Push a borrow frame before a nested operation that may use borrowed refs.
     /// This saves the current borrow stack pointer so we can restore it later.
     pub fn push_borrow_frame(&mut self) {
@@ -97,13 +92,12 @@ impl BatchState {
         if let Some(saved_pointer) = self.borrow_frame_stack.pop() {
             self.borrow_stack_pointer = saved_pointer;
         } else {
-            // No frame to restore, full reset to base
-            self.reset_borrow_stack();
+            eprintln!("Warning: pop_borrow_frame called with empty frame stack");
         }
     }
 
     /// Release a heap ID back to the free-list and queue it for JS drop.
-    pub fn release_heap_id(&mut self, id: u64) {
+    pub fn release_heap_id(&mut self, id: u64) -> Option<u64> {
         // Never release reserved IDs
         if id < JSIDX_RESERVED {
             unreachable!("Attempted to release reserved JS heap ID {}", id);
@@ -115,8 +109,14 @@ impl BatchState {
             id
         );
         match self.ids_to_free.last_mut() {
-            Some(ids) => ids.push(id),
-            None => self.free_ids.push(id),
+            Some(ids) => {
+                ids.push(id);
+                None
+            }
+            None => {
+                self.free_ids.push(id);
+                Some(id)
+            }
         }
     }
 
@@ -135,12 +135,16 @@ impl BatchState {
         self.ids_to_free.push(Vec::new());
     }
 
-    pub(crate) fn pop_and_release_ids(&mut self) {
+    pub(crate) fn pop_and_release_ids(&mut self) -> Vec<u64> {
+        let mut to_free = Vec::new();
         if let Some(ids) = self.ids_to_free.pop() {
             for id in ids {
-                self.release_heap_id(id);
+                if let Some(freed_id) = self.release_heap_id(id) {
+                    to_free.push(freed_id);
+                }
             }
         }
+        to_free
     }
 
     pub(crate) fn set_batching(&mut self, batching: bool) {
@@ -171,7 +175,7 @@ thread_local! {
 
 /// Check if we're currently inside a batch() call
 pub fn is_batching() -> bool {
-    BATCH_STATE.with(|state| state.borrow().is_batching())
+    dbg!(BATCH_STATE.with(|state| state.borrow().is_batching()))
 }
 
 /// Queue a JS drop operation for a heap ID.
@@ -182,9 +186,11 @@ pub(crate) fn queue_js_drop(id: u64) {
         "Attempted to drop reserved JS heap ID {}",
         id
     );
-    crate::js_helpers::js_drop_heap_ref(id);
     BATCH_STATE.with(|state| {
-        state.borrow_mut().release_heap_id(id);
+        let id = { state.borrow_mut().release_heap_id(id) };
+        if let Some(id) = id {
+            crate::js_helpers::js_drop_heap_ref(id);
+        }
     });
 }
 
@@ -208,64 +214,73 @@ pub(crate) fn run_js_sync<R: BatchableResult>(
     fn_id: u32,
     add_args: impl FnOnce(&mut EncodedData),
 ) -> R {
-    // Always batch together the call and any potential drops that may happen during encoding
-    batch(|| {
-        // Step 1: Encode the operation into the batch and get placeholder for non-flush types
-        // We take the current encoder out of the thread-local state to avoid borrowing issues
-        // and then put it back after adding the operation. Drops or other calls may happen while
-        // we are encoding, but they should be queued after this operation.
-        let mut batch = BATCH_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            // Push a new operation into the batch
-            state.push_ids_to_free();
-            state.take_encoder()
-        });
-        add_operation(&mut batch, fn_id, add_args);
+    // Step 1: Encode the operation into the batch and get placeholder for non-flush types
+    // We take the current encoder out of the thread-local state to avoid borrowing issues
+    // and then put it back after adding the operation. Drops or other calls may happen while
+    // we are encoding, but they should be queued after this operation.
+    let mut batch = BATCH_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        // Push a new operation into the batch
+        state.push_ids_to_free();
+        state.take_encoder()
+    });
+    add_operation(&mut batch, fn_id, add_args);
 
-        BATCH_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            let encoded_during_op = core::mem::replace(&mut state.encoder, batch);
-            state.extend_encoder(&encoded_during_op);
-        });
+    BATCH_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        let encoded_during_op = core::mem::replace(&mut state.encoder, batch);
+        state.extend_encoder(&encoded_during_op);
+    });
 
-        // Get placeholder for types that don't need flush
-        // This also increments opaque_count to keep heap IDs in sync
-        let result = if !R::needs_flush() {
-            let placeholder = BATCH_STATE.with(|state| {
-                let mut state = state.borrow_mut();
-                R::batched_placeholder(&mut state)
+    // Get placeholder for types that don't need flush
+    // This also increments opaque_count to keep heap IDs in sync
+    let result = if !R::needs_flush() {
+        let placeholder = BATCH_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            R::batched_placeholder(&mut state)
+        });
+        if !is_batching() {
+            println!("Not batching, flushing for non-opaque return");
+            flush_and_then(|data| {
+                assert!(data.is_empty());
             });
-            if !is_batching() {
-                flush_and_return::<R>()
-            } else {
-                placeholder
-            }
-        } else {
-            flush_and_return::<R>()
-        };
+        }
+        placeholder
+    } else {
+        flush_and_return::<R>()
+    };
 
-        // After running, free any queued IDs for this operation
-        BATCH_STATE.with(|state| {
-            state.borrow_mut().pop_and_release_ids();
-        });
+    // After running, free any queued IDs for this operation
+    BATCH_STATE.with(|state| {
+        let ids = { state.borrow_mut().pop_and_release_ids() };
+        for id in ids {
+            crate::js_helpers::js_drop_heap_ref(id);
+        }
+    });
 
-        result
-    })
+    result
 }
 
 /// Flush the current batch and return the decoded result.
 pub(crate) fn flush_and_return<R: BinaryDecode>() -> R {
+    flush_and_then(|mut data| R::decode(&mut data).expect("Failed to decode return value"))
+}
+
+pub(crate) fn flush_and_then<R>(then: impl for<'a> Fn(DecodedData<'a>) -> R) -> R {
     use crate::runtime::AppEvent;
     use pollster::FutureExt;
 
     let batch_msg = BATCH_STATE.with(|state| state.borrow_mut().take_message());
+    println!("Flushing batch {:?}", batch_msg);
 
     // Send and wait for result
     let runtime = get_runtime();
     (runtime.proxy)(AppEvent::Ipc(batch_msg));
-    let result: R = crate::runtime::wait_for_js_result().block_on();
-
-    result
+    loop {
+        if let Some(result) = crate::runtime::progress_js_with(&then).block_on() {
+            return result;
+        }
+    }
 }
 
 /// Execute operations inside a batch. Operations that return opaque types (like JsValue)
@@ -281,14 +296,18 @@ pub fn batch<R, F: FnOnce() -> R>(f: F) -> R {
 
     if !currently_batching {
         // Flush any remaining batched operations
-        let has_pending = BATCH_STATE.with(|state| !state.borrow().is_empty());
-        if has_pending {
-            flush_and_return::<()>();
-        }
+        force_flush();
     }
 
     // End batching
     BATCH_STATE.with(|state| state.borrow_mut().set_batching(currently_batching));
 
     result
+}
+
+pub fn force_flush() {
+    let has_pending = BATCH_STATE.with(|state| !state.borrow().is_empty());
+    if has_pending {
+        flush_and_return::<()>();
+    }
 }

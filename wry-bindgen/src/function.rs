@@ -12,7 +12,7 @@ use core::marker::PhantomData;
 
 use slotmap::{DefaultKey, SlotMap};
 
-use crate::batch::run_js_sync;
+use crate::batch::{force_flush, run_js_sync};
 use crate::encode::{BatchableResult, BinaryEncode, EncodeTypeDef, TYPE_CACHED, TYPE_FULL};
 use crate::ipc::DecodedData;
 use crate::ipc::EncodedData;
@@ -164,7 +164,7 @@ impl_js_function_call!(32, T1 P1 arg1, T2 P2 arg2, T3 P3 arg3, T4 P4 arg4, T5 P5
 /// - For `Fn` closures: stored directly, supports reentrant calls
 /// - For `FnMut` closures: wrapped in RefCell internally, panics on reentrant calls
 pub(crate) struct RustCallback {
-    pub(crate) f: alloc::rc::Rc<dyn Fn(&mut DecodedData, &mut EncodedData)>,
+    f: alloc::rc::Rc<dyn Fn(&mut DecodedData, &mut EncodedData)>,
 }
 
 impl RustCallback {
@@ -173,7 +173,12 @@ impl RustCallback {
     where
         F: Fn(&mut DecodedData, &mut EncodedData) + 'static,
     {
-        Self { f: alloc::rc::Rc::new(f) }
+        Self {
+            f: alloc::rc::Rc::new(move |data: &mut DecodedData, encoder: &mut EncodedData| {
+                f(data, encoder);
+                force_flush();
+            }),
+        }
     }
 
     /// Create a callback from an `FnMut` closure (panics on reentrant calls)
@@ -185,8 +190,11 @@ impl RustCallback {
         let cell = RefCell::new(f);
         Self {
             f: alloc::rc::Rc::new(move |data: &mut DecodedData, encoder: &mut EncodedData| {
-                let mut f = cell.borrow_mut();
-                f(data, encoder);
+                {
+                    let mut f = cell.borrow_mut();
+                    f(data, encoder);
+                }
+                force_flush();
             }),
         }
     }
@@ -220,6 +228,5 @@ thread_local! {
 
 /// Register a callback with the thread-local encoder using a short borrow
 pub(crate) fn register_value(callback: RustCallback) -> DefaultKey {
-    THREAD_LOCAL_OBJECT_ENCODER
-        .with(|fn_encoder| fn_encoder.borrow_mut().register_value(callback))
+    THREAD_LOCAL_OBJECT_ENCODER.with(|fn_encoder| fn_encoder.borrow_mut().register_value(callback))
 }

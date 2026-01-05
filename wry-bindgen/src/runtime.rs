@@ -18,7 +18,7 @@ use crate::encode::BinaryDecode;
 use crate::function::{
     CALL_EXPORT_FN_ID, DROP_NATIVE_REF_FN_ID, RustCallback, THREAD_LOCAL_OBJECT_ENCODER,
 };
-use crate::ipc::{DecodedData, DecodedVariant, EncodedData, IPCMessage};
+use crate::ipc::{DecodedData, DecodedVariant, IPCMessage};
 
 /// Application-level events that can be sent through the event loop.
 ///
@@ -189,6 +189,7 @@ fn handle_rust_callback(runtime: &WryRuntime, data: &mut DecodedData) {
             let response = IPCMessage::new_respond(|encoder| {
                 (callback)(data, encoder);
             });
+            println!("Finished Rust callback, preparing response");
 
             // Pop the borrow frame after the callback completes
             crate::batch::BATCH_STATE.with(|state| state.borrow_mut().pop_borrow_frame());

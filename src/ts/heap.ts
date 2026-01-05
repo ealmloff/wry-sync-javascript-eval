@@ -80,23 +80,16 @@ class JSHeap {
       throw new Error("Borrow stack overflow: too many borrowed references in a single operation");
     }
     this.borrowStackPointer--;
+    console.log("adding borrowed ref to", obj);
+    console.log("Borrow stack pointer after adding:", this.borrowStackPointer);
     this.slots[this.borrowStackPointer] = obj;
     return this.borrowStackPointer;
-  }
-
-  // Reset the borrow stack after an operation completes
-  // Clears all borrowed references
-  resetBorrowStack(): void {
-    // Clear slots in the borrow range
-    for (let i = this.borrowStackPointer; i < JSIDX_OFFSET; i++) {
-      this.slots[i] = undefined;
-    }
-    this.borrowStackPointer = JSIDX_OFFSET;
   }
 
   // Push a borrow frame before a nested operation that may add borrowed refs
   // This saves the current borrow stack pointer so we can restore it later
   pushBorrowFrame(): void {
+    console.log("Pushing borrow frame, saving pointer", this.borrowStackPointer);
     this.borrowFrameStack.push(this.borrowStackPointer);
   }
 
@@ -105,14 +98,15 @@ class JSHeap {
   popBorrowFrame(): void {
     const savedPointer = this.borrowFrameStack.pop();
     if (savedPointer !== undefined) {
+      console.log("Popping borrow frame, restoring pointer to", savedPointer);
       // Clear refs from this frame only (from current pointer up to saved pointer)
       for (let i = this.borrowStackPointer; i < savedPointer; i++) {
+        console.log("clearing borrowed ref at slot", i, "value was", this.slots[i]);
         this.slots[i] = undefined;
       }
       this.borrowStackPointer = savedPointer;
     } else {
-      // No frame to restore, full reset to base
-      this.resetBorrowStack();
+      console.log("Warning: popBorrowFrame called with empty frame stack");
     }
   }
 

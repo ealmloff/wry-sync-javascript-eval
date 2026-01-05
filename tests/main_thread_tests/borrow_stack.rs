@@ -198,6 +198,7 @@ pub(crate) fn test_borrowed_ref_deep_nesting() {
 
     #[wasm_bindgen(inline_js = r#"
         export function level1(ref1, cb1) {
+            console.log("In level1");
             const v1 = ref1.level;
             const result2 = cb1({ level: 2 });
             const valid1 = ref1.level === 1;
@@ -205,6 +206,7 @@ pub(crate) fn test_borrowed_ref_deep_nesting() {
         }
 
         export function level2(ref2, cb2) {
+            console.log("In level2");
             const v2 = ref2.level;
             const result3 = cb2({ level: 3 });
             const valid2 = ref2.level === 2;
@@ -212,6 +214,7 @@ pub(crate) fn test_borrowed_ref_deep_nesting() {
         }
 
         export function level3(ref3, cb3) {
+            console.log("In level3");
             const v3 = ref3.level;
             const result4 = cb3({ level: 4 });
             const valid3 = ref3.level === 3;
@@ -219,6 +222,7 @@ pub(crate) fn test_borrowed_ref_deep_nesting() {
         }
 
         export function level4(ref4) {
+            console.log("In level4");
             return { v4: ref4.level, valid4: ref4.level === 4 };
         }
 
@@ -237,19 +241,22 @@ pub(crate) fn test_borrowed_ref_deep_nesting() {
     let obj1 = make_level1();
 
     // Create nested callbacks - each level calls the next
-    let cb1 = Closure::new(move |ref2: &JsValue| -> JsValue {
-        level2(
+    let result = level1(&obj1, Closure::new(move |ref2: &JsValue| -> JsValue {
+        let out = level2(
             ref2,
             Closure::new(move |ref3: &JsValue| -> JsValue {
-                level3(
+                let out = level3(
                     ref3,
-                    Closure::new(move |ref4: &JsValue| -> JsValue { level4(ref4) }),
-                )
+                    Closure::new(move |ref4: &JsValue| -> JsValue {
+                        let out = level4(ref4);
+                        out
+                    }),
+                );
+                out
             }),
-        )
-    });
-
-    let result = level1(&obj1, cb1);
+        );
+        out
+    }));
 
     // Verify all levels saw their correct values
     assert_eq!(

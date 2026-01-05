@@ -292,6 +292,11 @@ impl<'a> DecodedData<'a> {
         self.str_buf = rem;
         Ok(s)
     }
+
+    /// Check if the decoded data is empty.
+    pub fn is_empty(&self) -> bool {
+        self.u8_buf.is_empty() && self.u16_buf.is_empty() && self.u32_buf.is_empty() && self.str_buf.is_empty()
+    }
 }
 
 /// Encoder for building binary messages.

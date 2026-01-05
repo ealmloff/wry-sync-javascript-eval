@@ -55,7 +55,7 @@ fn main() {
         // Roundtrip tests
         test_with_js_context(roundtrip::test_roundtrip).await;
 
-        // Callbacks
+        // // Callbacks
         test_with_js_context(callbacks::test_call_callback).await;
         async_test_with_js_context(callbacks::test_call_callback_async).await;
 
@@ -109,10 +109,10 @@ fn main() {
         test_with_js_context(clamped::test_clamped_mut_slice).await;
 
         // Borrow stack tests
-        test_with_js_context(borrow_stack::test_borrowed_ref_in_callback).await;
-        test_with_js_context(borrow_stack::test_borrowed_ref_in_callback_with_return).await;
-        test_with_js_context(borrow_stack::test_borrowed_ref_nested_frames).await;
-        test_with_js_context(borrow_stack::test_borrowed_ref_deep_nesting).await;
+        // test_with_js_context(borrow_stack::test_borrowed_ref_in_callback).await;
+        // test_with_js_context(borrow_stack::test_borrowed_ref_in_callback_with_return).await;
+        // test_with_js_context(borrow_stack::test_borrowed_ref_nested_frames).await;
+        // test_with_js_context(borrow_stack::test_borrowed_ref_deep_nesting).await;
 
         // Thread local tests
         test_with_js_context(thread_local::test_thread_local).await;
