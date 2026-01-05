@@ -238,25 +238,30 @@ pub(crate) fn test_borrowed_ref_deep_nesting() {
         fn extract(obj: &JsValue, key: &str) -> JsValue;
     }
 
+    println!("Creating level1 object");
     let obj1 = make_level1();
 
     // Create nested callbacks - each level calls the next
-    let result = level1(&obj1, Closure::new(move |ref2: &JsValue| -> JsValue {
-        let out = level2(
-            ref2,
-            Closure::new(move |ref3: &JsValue| -> JsValue {
-                let out = level3(
-                    ref3,
-                    Closure::new(move |ref4: &JsValue| -> JsValue {
-                        let out = level4(ref4);
-                        out
-                    }),
-                );
+    println!("Creating cb1");
+    let cb1 = Closure::new(move |ref2: &JsValue| -> JsValue {
+        println!("Creating cb2");
+        let cb2 = Closure::new(move |ref3: &JsValue| -> JsValue {
+            println!("Creating cb3");
+            let cb3 = Closure::new(move |ref4: &JsValue| -> JsValue {
+                println!("Calling level4");
+                let out = level4(ref4);
                 out
-            }),
-        );
+            });
+            println!("Calling level3");
+            let out = level3(ref3, cb3);
+            out
+        });
+        println!("Calling level2");
+        let out = level2(ref2, cb2);
         out
-    }));
+    });
+    println!("Calling level1");
+    let result = level1(&obj1, cb1);
 
     // Verify all levels saw their correct values
     assert_eq!(

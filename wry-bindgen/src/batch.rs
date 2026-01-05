@@ -60,13 +60,19 @@ impl BatchState {
     /// Get the next heap ID for placeholder allocation.
     /// Uses free-list strategy: reuses freed IDs first, then allocates new ones.
     pub fn get_next_heap_id(&mut self) -> u64 {
-        if let Some(id) = self.free_ids.pop() {
+        let result = if let Some(id) = self.free_ids.pop() {
             id
         } else {
             let id = self.max_id;
             self.max_id += 1;
             id
-        }
+        };
+        println!(
+            "Allocating next heap ID {}, free IDs remaining: {}",
+            result,
+            self.free_ids.len()
+        );
+        result
     }
 
     /// Get the next borrow ID from the borrow stack (indices 1-127).
@@ -102,6 +108,8 @@ impl BatchState {
         if id < JSIDX_RESERVED {
             unreachable!("Attempted to release reserved JS heap ID {}", id);
         }
+
+        println!("Releasing heap ID {}", id);
 
         debug_assert!(
             !self.free_ids.contains(&id) && !self.ids_to_free.iter().any(|ids| ids.contains(&id)),
@@ -235,17 +243,16 @@ pub(crate) fn run_js_sync<R: BatchableResult>(
     // Get placeholder for types that don't need flush
     // This also increments opaque_count to keep heap IDs in sync
     let result = if !R::needs_flush() {
-        let placeholder = BATCH_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            R::batched_placeholder(&mut state)
-        });
         if !is_batching() {
             println!("Not batching, flushing for non-opaque return");
             flush_and_then(|data| {
                 assert!(data.is_empty());
             });
         }
-        placeholder
+        BATCH_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            R::batched_placeholder(&mut state)
+        })
     } else {
         flush_and_return::<R>()
     };

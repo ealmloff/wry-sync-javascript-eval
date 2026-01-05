@@ -45,6 +45,8 @@ class JSHeap {
       this.maxId++;
     }
     this.slots[id] = value;
+    console.log(`Inserted value into JSHeap slot id ${id}, value:`, value);
+    console.log("Current JSHeap slots: ", Array.from(this.slots));
     return id;
   }
 
@@ -57,6 +59,7 @@ class JSHeap {
     if (id < JSIDX_RESERVED) {
       return this.slots[id];
     }
+    console.log(`Removing JSHeap slot id ${id}, value was`, this.slots[id]);
 
     const value = this.slots[id];
 
