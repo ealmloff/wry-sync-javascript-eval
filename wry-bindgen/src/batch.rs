@@ -60,19 +60,13 @@ impl BatchState {
     /// Get the next heap ID for placeholder allocation.
     /// Uses free-list strategy: reuses freed IDs first, then allocates new ones.
     pub fn get_next_heap_id(&mut self) -> u64 {
-        let result = if let Some(id) = self.free_ids.pop() {
+        if let Some(id) = self.free_ids.pop() {
             id
         } else {
             let id = self.max_id;
             self.max_id += 1;
             id
-        };
-        println!(
-            "Allocating next heap ID {}, free IDs remaining: {}",
-            result,
-            self.free_ids.len()
-        );
-        result
+        }
     }
 
     /// Get the next borrow ID from the borrow stack (indices 1-127).
@@ -108,8 +102,6 @@ impl BatchState {
         if id < JSIDX_RESERVED {
             unreachable!("Attempted to release reserved JS heap ID {}", id);
         }
-
-        println!("Releasing heap ID {}", id);
 
         debug_assert!(
             !self.free_ids.contains(&id) && !self.ids_to_free.iter().any(|ids| ids.contains(&id)),
@@ -183,7 +175,7 @@ thread_local! {
 
 /// Check if we're currently inside a batch() call
 pub fn is_batching() -> bool {
-    dbg!(BATCH_STATE.with(|state| state.borrow().is_batching()))
+    BATCH_STATE.with(|state| state.borrow().is_batching())
 }
 
 /// Queue a JS drop operation for a heap ID.
@@ -244,7 +236,6 @@ pub(crate) fn run_js_sync<R: BatchableResult>(
     // This also increments opaque_count to keep heap IDs in sync
     let result = if !R::needs_flush() {
         if !is_batching() {
-            println!("Not batching, flushing for non-opaque return");
             flush_and_then(|data| {
                 assert!(data.is_empty());
             });
@@ -278,7 +269,6 @@ pub(crate) fn flush_and_then<R>(then: impl for<'a> Fn(DecodedData<'a>) -> R) -> 
     use pollster::FutureExt;
 
     let batch_msg = BATCH_STATE.with(|state| state.borrow_mut().take_message());
-    println!("Flushing batch {:?}", batch_msg);
 
     // Send and wait for result
     let runtime = get_runtime();
