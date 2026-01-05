@@ -121,6 +121,21 @@ impl BindgenAttrs {
         self.thread_local_v2.is_some()
     }
 
+    /// Check if this is an indexing getter
+    pub fn is_indexing_getter(&self) -> bool {
+        self.indexing_getter.is_some()
+    }
+
+    /// Check if this is an indexing setter
+    pub fn is_indexing_setter(&self) -> bool {
+        self.indexing_setter.is_some()
+    }
+
+    /// Check if this is an indexing deleter
+    pub fn is_indexing_deleter(&self) -> bool {
+        self.indexing_deleter.is_some()
+    }
+
     /// Get the crate path as a TokenStream, defaulting to `wasm_bindgen`
     pub fn crate_path_tokens(&self) -> TokenStream {
         match &self.crate_path {

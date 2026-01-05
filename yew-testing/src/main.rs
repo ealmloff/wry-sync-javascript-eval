@@ -33,9 +33,35 @@ fn app_component() -> Html {
     });
 
     html! {
-        <div style="font-family: sans-serif; padding: 20px;">
-            <h1>{ "Yew + Wry Counter" }</h1>
-            <p style="font-size: 48px;">{ *counter }</p>
-        </div>
+        <>
+            <div style="font-family: sans-serif; padding: 20px;">
+                <h1>{ "Yew + Wry Counter" }</h1>
+                <p style="font-size: 48px;">{ *counter }</p>
+            </div>
+            <Counter />
+        </>
+    }
+}
+
+#[function_component]
+fn Counter() -> Html {
+    let state = use_state(|| 0);
+
+    let incr_counter = {
+        let state = state.clone();
+        Callback::from(move |_| state.set(*state + 1))
+    };
+
+    let decr_counter = {
+        let state = state.clone();
+        Callback::from(move |_| state.set(*state - 1))
+    };
+
+    html! {
+        <>
+            <p> {"current count: "} {*state} </p>
+            <button onclick={incr_counter}> {"+"} </button>
+            <button onclick={decr_counter}> {"-"} </button>
+        </>
     }
 }

@@ -151,6 +151,21 @@ pub enum ImportFunctionKind {
         /// Property name (may differ from function name)
         property: String,
     },
+    /// Indexing getter (e.g., obj[index])
+    IndexingGetter {
+        /// The receiver type
+        receiver: Type,
+    },
+    /// Indexing setter (e.g., obj[index] = value)
+    IndexingSetter {
+        /// The receiver type
+        receiver: Type,
+    },
+    /// Indexing deleter (e.g., delete obj[index])
+    IndexingDeleter {
+        /// The receiver type
+        receiver: Type,
+    },
     /// Constructor
     Constructor {
         /// The class being constructed
@@ -636,6 +651,15 @@ fn extract_wasm_bindgen_attrs(attrs: &[syn::Attribute]) -> syn::Result<BindgenAt
             if let Some(span) = parsed.thread_local_v2 {
                 combined.thread_local_v2 = Some(span);
             }
+            if let Some(span) = parsed.indexing_getter {
+                combined.indexing_getter = Some(span);
+            }
+            if let Some(span) = parsed.indexing_setter {
+                combined.indexing_setter = Some(span);
+            }
+            if let Some(span) = parsed.indexing_deleter {
+                combined.indexing_deleter = Some(span);
+            }
             combined.vendor_prefixes.extend(parsed.vendor_prefixes);
         }
     }
@@ -739,6 +763,21 @@ fn parse_foreign_fn(f: syn::ForeignItemFn, attrs: BindgenAttrs) -> syn::Result<I
                 js_name.strip_prefix("set_").unwrap_or(&js_name).to_string()
             });
         ImportFunctionKind::Setter { receiver, property }
+    } else if attrs.is_indexing_getter() {
+        let receiver = receiver.ok_or_else(|| {
+            syn::Error::new_spanned(&f.sig, "indexing_getter must have a receiver argument")
+        })?;
+        ImportFunctionKind::IndexingGetter { receiver }
+    } else if attrs.is_indexing_setter() {
+        let receiver = receiver.ok_or_else(|| {
+            syn::Error::new_spanned(&f.sig, "indexing_setter must have a receiver argument")
+        })?;
+        ImportFunctionKind::IndexingSetter { receiver }
+    } else if attrs.is_indexing_deleter() {
+        let receiver = receiver.ok_or_else(|| {
+            syn::Error::new_spanned(&f.sig, "indexing_deleter must have a receiver argument")
+        })?;
+        ImportFunctionKind::IndexingDeleter { receiver }
     } else if attrs.is_method() {
         let receiver = receiver.ok_or_else(|| {
             syn::Error::new_spanned(&f.sig, "method must have a receiver argument")

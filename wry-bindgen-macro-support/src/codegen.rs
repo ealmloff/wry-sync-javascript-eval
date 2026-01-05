@@ -365,7 +365,10 @@ fn generate_function(
         }
         ImportFunctionKind::Method { .. }
         | ImportFunctionKind::Getter { .. }
-        | ImportFunctionKind::Setter { .. } => {
+        | ImportFunctionKind::Setter { .. }
+        | ImportFunctionKind::IndexingGetter { .. }
+        | ImportFunctionKind::IndexingSetter { .. }
+        | ImportFunctionKind::IndexingDeleter { .. } => {
             let class = func.js_class.as_deref().unwrap_or("global");
             format!("{}::{}", class, rust_name)
         }
@@ -447,7 +450,10 @@ fn generate_function(
         }
         ImportFunctionKind::Method { receiver }
         | ImportFunctionKind::Getter { receiver, .. }
-        | ImportFunctionKind::Setter { receiver, .. } => {
+        | ImportFunctionKind::Setter { receiver, .. }
+        | ImportFunctionKind::IndexingGetter { receiver }
+        | ImportFunctionKind::IndexingSetter { receiver }
+        | ImportFunctionKind::IndexingDeleter { receiver } => {
             // Extract the type name from the receiver
             let receiver_type = extract_type_name(receiver)?;
 
@@ -596,7 +602,10 @@ fn generate_async_function(
         }
         ImportFunctionKind::Method { receiver }
         | ImportFunctionKind::Getter { receiver, .. }
-        | ImportFunctionKind::Setter { receiver, .. } => {
+        | ImportFunctionKind::Setter { receiver, .. }
+        | ImportFunctionKind::IndexingGetter { receiver }
+        | ImportFunctionKind::IndexingSetter { receiver }
+        | ImportFunctionKind::IndexingDeleter { receiver } => {
             // Extract the type name from the receiver
             let receiver_type = extract_type_name(receiver)?;
 
@@ -723,6 +732,21 @@ fn generate_js_code(
             "(obj, value)".to_string(),
             format!("obj.{} = value", property),
         ),
+        ImportFunctionKind::IndexingGetter { .. } => {
+            // obj[index] - takes one argument (the index)
+            ("(obj, index)".to_string(), "obj[index]".to_string())
+        }
+        ImportFunctionKind::IndexingSetter { .. } => {
+            // obj[index] = value - takes two arguments (index and value)
+            (
+                "(obj, index, value)".to_string(),
+                "obj[index] = value".to_string(),
+            )
+        }
+        ImportFunctionKind::IndexingDeleter { .. } => {
+            // delete obj[index] - takes one argument (the index)
+            ("(obj, index)".to_string(), "delete obj[index]".to_string())
+        }
         ImportFunctionKind::Constructor { class } => {
             // Use a{index} naming to avoid conflicts with JS reserved words
             let args: Vec<_> = (0..func.arguments.len())
@@ -815,7 +839,10 @@ fn generate_args(func: &ImportFunction, krate: &TokenStream) -> syn::Result<Gene
     match &func.kind {
         ImportFunctionKind::Method { .. }
         | ImportFunctionKind::Getter { .. }
-        | ImportFunctionKind::Setter { .. } => {
+        | ImportFunctionKind::Setter { .. }
+        | ImportFunctionKind::IndexingGetter { .. }
+        | ImportFunctionKind::IndexingSetter { .. }
+        | ImportFunctionKind::IndexingDeleter { .. } => {
             fn_types.push(quote_spanned! {span=> &#krate::JsValue });
             call_values.push(quote_spanned! {span=> &self.obj });
         }
