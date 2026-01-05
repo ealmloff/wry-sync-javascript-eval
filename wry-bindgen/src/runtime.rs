@@ -65,16 +65,13 @@ impl WryRuntime {
     pub fn queue_rust_call(&self, responder: IPCMessage) {
         if let Some(sender) = self.sender.write().as_mut() {
             sender.try_send(responder).unwrap();
-            println!("Sending Rust call immediately");
         } else {
-            println!("Queueing Rust call");
             self.queued_rust_calls.write().push(responder);
         }
     }
 
     /// Set the sender for Rust calls and flush any queued calls.
     pub fn set_sender(&self, sender: Sender<IPCMessage>) {
-        println!("Setting Rust call sender");
         let mut queued = self.queued_rust_calls.write();
         *self.sender.write() = Some(sender);
         for call in queued.drain(..) {
@@ -136,7 +133,6 @@ pub async fn wait_for_js_event<R: BinaryDecode>() -> Option<R> {
 pub async fn progress_js_with<O>(with_respond: impl for<'a> Fn(DecodedData<'a>) -> O) -> Option<O> {
     let runtime = get_runtime();
 
-    println!("Polling JS response...");
     let response = THREAD_LOCAL_RECEIVER
         .with(|receiver| receiver.clone())
         .recv()
@@ -144,11 +140,9 @@ pub async fn progress_js_with<O>(with_respond: impl for<'a> Fn(DecodedData<'a>) 
         .expect("Failed to receive JS response");
 
     let decoder = response.decoded().expect("Failed to decode response");
-    println!("Received IPC response: {:?}", decoder);
     match decoder {
         DecodedVariant::Respond { data } => Some(with_respond(data)),
         DecodedVariant::Evaluate { mut data } => {
-            println!("Handling Rust callback from JS");
             handle_rust_callback(runtime, &mut data);
             None
         }
@@ -187,7 +181,6 @@ fn handle_rust_callback(runtime: &WryRuntime, data: &mut DecodedData) {
             let response = IPCMessage::new_respond(|encoder| {
                 (callback)(data, encoder);
             });
-            println!("Finished Rust callback, preparing response");
 
             // Pop the borrow frame after the callback completes
             crate::batch::BATCH_STATE.with(|state| state.borrow_mut().pop_borrow_frame());
