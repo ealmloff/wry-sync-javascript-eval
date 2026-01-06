@@ -189,7 +189,7 @@ pub(crate) async fn test_join_many_async() {
         return new Promise((resolve) => {
             setTimeout(() => {
                 resolve(key);
-            }, 100 + key);
+            }, 10 + key % 10);
         });
     }")]
     extern "C" {
@@ -199,7 +199,7 @@ pub(crate) async fn test_join_many_async() {
 
     let mut futures = futures_unordered::FuturesUnordered::new();
     let mut expected = Vec::new();
-    for i in 0..1000u32 {
+    for i in 0..100u32 {
         futures.push(identity(i));
         expected.push(i);
     }

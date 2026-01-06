@@ -39,7 +39,7 @@ pub(crate) async fn test_join_many_callbacks_async() {
     #[wasm_bindgen(inline_js = "export async function identity(callback, key) {
         setTimeout(() => {
             callback(key);
-        }, 100 + key % 10);
+        }, 10 + key % 10);
     }")]
     extern "C" {
         #[wasm_bindgen]
