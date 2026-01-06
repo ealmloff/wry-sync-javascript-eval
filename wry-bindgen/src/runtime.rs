@@ -210,7 +210,6 @@ pub async fn progress_js_with<O>(with_respond: impl for<'a> Fn(DecodedData<'a>) 
         DecodedVariant::Respond { data } => Some(with_respond(data)),
         DecodedVariant::Evaluate { mut data } => {
             handle_rust_callback(runtime, &mut data);
-            println!("evaluate");
             None
         }
     }

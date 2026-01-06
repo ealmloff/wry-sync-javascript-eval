@@ -15,6 +15,19 @@ fn app() {
 
 #[function_component(App)]
 fn app_component() -> Html {
+    html! {
+        <>
+            <AutoIncrementCounter />
+            <AutoIncrementCounter />
+            <AutoIncrementCounter />
+            <AutoIncrementCounter />
+            <Counter />
+        </>
+    }
+}
+
+#[function_component(AutoIncrementCounter)]
+fn auto_incrementing_counter() -> Html {
     let counter = use_state(|| 0);
     let increment_count: Callback<_> = use_callback(counter.clone(), {
         move |_, counter| {
@@ -27,7 +40,7 @@ fn app_component() -> Html {
     use_effect_with(increment_count, move |increment_count| {
         let increment_count = increment_count.clone();
         spawn_local(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(0)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             increment_count.emit(());
         });
     });
@@ -38,7 +51,6 @@ fn app_component() -> Html {
                 <h1>{ "Yew + Wry Counter" }</h1>
                 <p style="font-size: 48px;">{ *counter }</p>
             </div>
-            <Counter />
         </>
     }
 }
