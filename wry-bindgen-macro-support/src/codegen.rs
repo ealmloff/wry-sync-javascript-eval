@@ -1023,12 +1023,23 @@ fn generate_string_enum(string_enum: &StringEnum, krate: &TokenStream) -> syn::R
     };
 
     // Generate EncodeTypeDef implementation
-    // String enums encode as u32 discriminant
+    // String enums use StringEnum tag with embedded variant strings
+    let variant_count_u8 = variant_count as u8;
     let encode_type_def_impl = quote! {
         impl #krate::EncodeTypeDef for #enum_name {
             fn encode_type_def(buf: &mut Vec<u8>) {
-                // String enums encode as u32 (discriminant)
-                <u32 as #krate::EncodeTypeDef>::encode_type_def(buf);
+                // Push StringEnum tag
+                buf.push(#krate::encode::TypeTag::StringEnum as u8);
+                // Push variant count
+                buf.push(#variant_count_u8);
+                // Push each variant string (length as u32 + bytes)
+                #(
+                    let s: &str = #variant_values;
+                    let bytes = s.as_bytes();
+                    let len = bytes.len() as u32;
+                    buf.extend_from_slice(&len.to_le_bytes());
+                    buf.extend_from_slice(bytes);
+                )*
             }
         }
     };

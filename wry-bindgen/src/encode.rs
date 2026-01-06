@@ -99,6 +99,10 @@ pub enum TypeTag {
     /// Clamped u8 array type: represents Uint8ClampedArray in JS.
     /// Element type is always u8. Encodes as u32 length + u8 elements.
     U8Clamped = 23,
+    /// String enum type: encodes as u32 index, but type def includes variant strings.
+    /// Format: [StringEnum tag] [variant_count: u8] [for each: string_len: u32, string_bytes...]
+    /// Values encode as u32 discriminant. JS decodes using the lookup array.
+    StringEnum = 24,
 }
 
 /// Trait for types that can encode their type definition into the binary protocol.
