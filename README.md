@@ -14,9 +14,10 @@ The paint example from web-sys running unmodified from a native thread:
 
 https://github.com/user-attachments/assets/a34c15f2-ff03-4a85-b447-f1aa0c6b924c
 
-Yew's todoMVC example running unmodified from a native thread:
-
-
-
 A modified version of dioxus web (that doesn't use the sledgehammer optimizations) running on a native thread:
 
+https://github.com/user-attachments/assets/0d56b30b-9791-44cb-9487-e406bb891ef4
+
+Yew's todoMVC example running unmodified from a native thread:
+
+https://github.com/user-attachments/assets/d13183a4-4d62-44ae-854e-11830126ca15
