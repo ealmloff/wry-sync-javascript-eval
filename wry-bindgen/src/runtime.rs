@@ -71,12 +71,14 @@ impl IPCReceivers {
             eval_receiver,
             respond_receiver,
         } = self;
-        futures_util::select! {
-            eval_msg = eval_receiver.next().fuse() => {
-                eval_msg.expect("Failed to receive evaluate message")
-            },
+        futures_util::select_biased! {
+            // We need to always poll the respond receiver first. If the response is ready, quit immediately
+            // before running any more callbacks
             respond_msg = respond_receiver.next().fuse() => {
                 respond_msg.expect("Failed to receive respond message")
+            },
+            eval_msg = eval_receiver.next().fuse() => {
+                eval_msg.expect("Failed to receive evaluate message")
             },
         }
     }
@@ -208,6 +210,7 @@ pub async fn progress_js_with<O>(with_respond: impl for<'a> Fn(DecodedData<'a>) 
         DecodedVariant::Respond { data } => Some(with_respond(data)),
         DecodedVariant::Evaluate { mut data } => {
             handle_rust_callback(runtime, &mut data);
+            println!("evaluate");
             None
         }
     }
