@@ -105,6 +105,8 @@ fn main() {
         test_with_js_context(string_enum::test_string_enum_to_str).await;
         test_with_js_context(string_enum::test_string_enum_to_jsvalue).await;
         test_with_js_context(string_enum::test_string_enum_from_jsvalue).await;
+        test_with_js_context(string_enum::test_string_enum_pass_to_js).await;
+        test_with_js_context(string_enum::test_string_enum_receive_from_js).await;
 
         // Catch attribute tests
         test_with_js_context(catch_attribute::test_catch_throws_error).await;

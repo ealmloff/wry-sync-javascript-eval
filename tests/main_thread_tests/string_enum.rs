@@ -64,3 +64,53 @@ pub fn test_string_enum_from_jsvalue() {
     let pref_invalid = WebGlPowerPreference::from_js_value(&js_invalid);
     assert_eq!(pref_invalid, None);
 }
+
+// JavaScript function that accepts a string enum and returns its string value
+#[wasm_bindgen(inline_js = "
+export function get_string_enum_value(value) {
+    // This should receive the string value, not a number
+    if (typeof value !== 'string') {
+        throw new Error('Expected string but got ' + typeof value + ': ' + value);
+    }
+    return value;
+}
+")]
+extern "C" {
+    fn get_string_enum_value(value: WebGlPowerPreference) -> String;
+}
+
+// Test that string enums are correctly passed to JavaScript as strings
+pub fn test_string_enum_pass_to_js() {
+    // Pass each variant and verify JS receives the correct string
+    let result1 = get_string_enum_value(WebGlPowerPreference::Default);
+    assert_eq!(result1, "default", "JS should receive 'default'");
+
+    let result2 = get_string_enum_value(WebGlPowerPreference::LowPower);
+    assert_eq!(result2, "low-power", "JS should receive 'low-power'");
+
+    let result3 = get_string_enum_value(WebGlPowerPreference::HighPerformance);
+    assert_eq!(result3, "high-performance", "JS should receive 'high-performance'");
+}
+
+// JavaScript function that returns a string enum value
+#[wasm_bindgen(inline_js = "
+export function return_string_enum(index) {
+    const values = ['default', 'low-power', 'high-performance'];
+    return values[index];
+}
+")]
+extern "C" {
+    fn return_string_enum(index: u32) -> WebGlPowerPreference;
+}
+
+// Test that string enums are correctly received from JavaScript
+pub fn test_string_enum_receive_from_js() {
+    let result1 = return_string_enum(0);
+    assert_eq!(result1, WebGlPowerPreference::Default);
+
+    let result2 = return_string_enum(1);
+    assert_eq!(result2, WebGlPowerPreference::LowPower);
+
+    let result3 = return_string_enum(2);
+    assert_eq!(result3, WebGlPowerPreference::HighPerformance);
+}
