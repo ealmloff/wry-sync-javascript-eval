@@ -3,7 +3,7 @@
 //! This module generates Rust code that uses the wry-bindgen runtime
 //! and inventory-based function registration.
 
-use std::hash::{BuildHasher, Hash, Hasher, RandomState};
+use std::hash::{BuildHasher, RandomState};
 
 use crate::ast::{
     ExportMethod, ExportMethodKind, ExportStruct, ImportFunction, ImportFunctionKind, ImportStatic,
@@ -42,9 +42,9 @@ pub fn generate(program: &Program) -> syn::Result<TokenStream> {
     if let Some((span, content_expr)) = module_content {
         let unique_hash = {
             let s = RandomState::new();
-            let mut hasher = s.build_hasher();
-            content_expr.to_string().hash(&mut hasher);
-            hasher.finish()
+            
+            
+            s.hash_one(content_expr.to_string())
         };
         let unique_ident = format_ident!("__WRY_BINDGEN_INLINE_JS_MODULE_HASH_{}", unique_hash);
         // Create a static and submit it to the inventory
@@ -431,8 +431,8 @@ fn generate_function(
         ImportFunctionKind::Normal => {
             // Check if this function has a single-element js_namespace that matches a type
             // defined in this extern block. If so, generate as a static method to avoid collisions.
-            if let Some(ns) = &func.js_namespace {
-                if ns.len() == 1 && type_names.contains(&ns[0]) {
+            if let Some(ns) = &func.js_namespace
+                && ns.len() == 1 && type_names.contains(&ns[0]) {
                     let class_ident = format_ident!("{}", &ns[0]);
                     return Ok(quote_spanned! {span=>
                         impl #class_ident {
@@ -443,7 +443,6 @@ fn generate_function(
                         }
                     });
                 }
-            }
             Ok(quote_spanned! {span=>
                 #rust_attrs
                 #vis fn #rust_name(#fn_params) -> #ret_type {
@@ -1762,11 +1761,10 @@ fn extract_result_ok_type(ty: &syn::Type) -> Option<syn::Type> {
         if segment.ident != "Result" {
             return None;
         }
-        if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-            if let Some(syn::GenericArgument::Type(ok_ty)) = args.args.first() {
+        if let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+            && let Some(syn::GenericArgument::Type(ok_ty)) = args.args.first() {
                 return Some(ok_ty.clone());
             }
-        }
     }
     None
 }

@@ -118,12 +118,12 @@ impl JsValue {
 
     /// Creates a JS string from a Rust string.
     pub fn from_str(s: &str) -> JsValue {
-        s.try_into().unwrap()
+        s.into()
     }
 
     /// Creates a JS number from an f64.
     pub fn from_f64(n: f64) -> JsValue {
-        n.try_into().unwrap()
+        n.into()
     }
 }
 

@@ -578,9 +578,9 @@ impl FunctionRegistry {
             // Only import each unique module once
             if imported_modules.insert(hash.clone()) {
                 // Dynamically import the module from wry://snippets/{hash}.js
-                write!(
+                writeln!(
                     &mut script,
-                    "  const module_{} = await import('wry://snippets/{}.js');\n",
+                    "  const module_{} = await import('wry://snippets/{}.js');",
                     hash, hash
                 )
                 .unwrap();
@@ -605,7 +605,7 @@ impl FunctionRegistry {
         for member in inventory::iter::<JsClassMemberSpec>() {
             class_members
                 .entry(member.class_name)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(member);
         }
 
