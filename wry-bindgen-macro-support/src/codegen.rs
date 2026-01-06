@@ -42,8 +42,7 @@ pub fn generate(program: &Program) -> syn::Result<TokenStream> {
     if let Some((span, content_expr)) = module_content {
         let unique_hash = {
             let s = RandomState::new();
-            
-            
+
             s.hash_one(content_expr.to_string())
         };
         let unique_ident = format_ident!("__WRY_BINDGEN_INLINE_JS_MODULE_HASH_{}", unique_hash);
@@ -432,17 +431,19 @@ fn generate_function(
             // Check if this function has a single-element js_namespace that matches a type
             // defined in this extern block. If so, generate as a static method to avoid collisions.
             if let Some(ns) = &func.js_namespace
-                && ns.len() == 1 && type_names.contains(&ns[0]) {
-                    let class_ident = format_ident!("{}", &ns[0]);
-                    return Ok(quote_spanned! {span=>
-                        impl #class_ident {
-                            #rust_attrs
-                            #vis fn #rust_name(#fn_params) -> #ret_type {
-                                #func_body
-                            }
+                && ns.len() == 1
+                && type_names.contains(&ns[0])
+            {
+                let class_ident = format_ident!("{}", &ns[0]);
+                return Ok(quote_spanned! {span=>
+                    impl #class_ident {
+                        #rust_attrs
+                        #vis fn #rust_name(#fn_params) -> #ret_type {
+                            #func_body
                         }
-                    });
-                }
+                    }
+                });
+            }
             Ok(quote_spanned! {span=>
                 #rust_attrs
                 #vis fn #rust_name(#fn_params) -> #ret_type {
@@ -1762,9 +1763,10 @@ fn extract_result_ok_type(ty: &syn::Type) -> Option<syn::Type> {
             return None;
         }
         if let syn::PathArguments::AngleBracketed(args) = &segment.arguments
-            && let Some(syn::GenericArgument::Type(ok_ty)) = args.args.first() {
-                return Some(ok_ty.clone());
-            }
+            && let Some(syn::GenericArgument::Type(ok_ty)) = args.args.first()
+        {
+            return Some(ok_ty.clone());
+        }
     }
     None
 }

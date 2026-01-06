@@ -20,9 +20,10 @@ fn extract_simple_type_name(ty: &Type) -> Option<String> {
                 let seg_name = segment.ident.to_string();
                 if seg_name == "Result" || seg_name == "Option" {
                     if let syn::PathArguments::AngleBracketed(args) = &segment.arguments
-                        && let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
-                            return extract_simple_type_name(inner_ty);
-                        }
+                        && let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first()
+                    {
+                        return extract_simple_type_name(inner_ty);
+                    }
                 } else {
                     // For other types, return the segment name
                     return Some(seg_name);

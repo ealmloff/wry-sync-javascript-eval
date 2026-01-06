@@ -37,7 +37,8 @@ pub(crate) const JSIDX_RESERVED: u64 = JSIDX_OFFSET + 4;
 /// Unlike wasm-bindgen which runs in a single-threaded Wasm environment,
 /// this implementation uses the IPC protocol to communicate with JS.
 pub struct JsValue {
-    idx: u64,
+    #[doc(hidden)]
+    pub idx: u64,
 }
 
 impl JsValue {

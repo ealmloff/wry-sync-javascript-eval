@@ -527,7 +527,6 @@ impl JsExportSpec {
 inventory::collect!(JsExportSpec);
 
 /// Registry of JS functions collected via inventory
-
 pub struct FunctionRegistry {
     functions: String,
     function_specs: Vec<JsFunctionSpec>,
