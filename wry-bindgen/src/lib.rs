@@ -337,7 +337,7 @@ use core::ops::{Deref, DerefMut};
 pub use cast::JsCast;
 pub use convert::{FromWasmAbi, IntoWasmAbi, RefFromWasmAbi};
 pub use lazy::JsThreadLocal;
-use once_cell::sync::Lazy;
+use once_cell::sync::{Lazy, OnceCell};
 pub use value::JsValue;
 
 /// A wrapper type around slices and vectors for binding the `Uint8ClampedArray` in JS.
@@ -442,9 +442,7 @@ impl JsCast for JsError {
 
 // Re-export commonly used items
 pub use batch::batch;
-pub use encode::{
-    BatchableResult, BinaryDecode, BinaryEncode, EncodeTypeDef, TYPE_CACHED, TYPE_FULL,
-};
+pub use encode::{BatchableResult, BinaryDecode, BinaryEncode, EncodeTypeDef};
 pub use function::JSFunction;
 pub use ipc::{
     DecodeError, DecodedData, DecodedVariant, EncodedData, IPCMessage, MessageType, decode_data,
@@ -465,6 +463,33 @@ use crate::encode::IntoClosure;
 pub struct JsFunctionSpec {
     /// Function that generates the JS code
     pub js_code: fn() -> String,
+}
+
+impl JsFunctionSpec {
+    pub const fn resolve_as<F>(&self) -> LazyJsFunction<F> {
+        LazyJsFunction {
+            spec: *self,
+            inner: OnceCell::new(),
+        }
+    }
+}
+
+/// A type that dynamically resolves to a JSFunction from the registry on first use.
+pub struct LazyJsFunction<F> {
+    spec: JsFunctionSpec,
+    inner: OnceCell<JSFunction<F>>,
+}
+
+impl<F> Deref for LazyJsFunction<F> {
+    type Target = JSFunction<F>;
+
+    fn deref(&self) -> &Self::Target {
+        self.inner.get_or_init(|| {
+            FUNCTION_REGISTRY
+                .get_function(self.spec)
+                .unwrap_or_else(|| panic!("Function not found for code: {}", (self.spec.js_code)()))
+        })
+    }
 }
 
 /// Inline JS module info
@@ -589,14 +614,14 @@ impl JsExportSpec {
 inventory::collect!(JsExportSpec);
 
 /// Registry of JS functions collected via inventory
-pub struct FunctionRegistry {
+struct FunctionRegistry {
     functions: String,
     function_specs: Vec<JsFunctionSpec>,
     /// Map of module path -> module content for inline_js modules
     modules: alloc::collections::BTreeMap<String, &'static str>,
 }
 
-pub static FUNCTION_REGISTRY: Lazy<FunctionRegistry> =
+static FUNCTION_REGISTRY: Lazy<FunctionRegistry> =
     Lazy::new(FunctionRegistry::collect_from_inventory);
 
 /// Generate argument names for JS function (a0, a1, a2, ...)

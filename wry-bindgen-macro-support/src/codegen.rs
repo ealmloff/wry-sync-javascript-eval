@@ -307,8 +307,6 @@ fn generate_type(ty: &ImportType, krate: &TokenStream) -> syn::Result<TokenStrea
         format!("(a0) => a0 instanceof {class_expr}")
     };
 
-    let instanceof_registry_name = format!("{rust_name}::__instanceof");
-
     // Generate is_type_of implementation if provided
     let is_type_of_impl = ty.is_type_of.as_ref().map(|is_type_of| {
         quote_spanned! {span=>
@@ -323,22 +321,20 @@ fn generate_type(ty: &ImportType, krate: &TokenStream) -> syn::Result<TokenStrea
     let jscast_impl = quote_spanned! {span=>
         impl #krate::JsCast for #rust_name {
             fn instanceof(__val: &#krate::JsValue) -> bool {
-                static __INSTANCEOF_SPEC: #krate::JsFunctionSpec = #krate::JsFunctionSpec::new(
+                static __SPEC: #krate::JsFunctionSpec = #krate::JsFunctionSpec::new(
                     || #krate::alloc::format!(#instanceof_js_code),
                 );
 
                 #krate::inventory::submit! {
-                    __INSTANCEOF_SPEC
+                    __SPEC
                 }
 
                 // Look up the instanceof check function at runtime
-                let __func: #krate::JSFunction<fn(&#krate::JsValue) -> bool> =
-                    #krate::FUNCTION_REGISTRY
-                        .get_function(__INSTANCEOF_SPEC)
-                        .expect(concat!("Function not found: ", #instanceof_registry_name));
+                static __FUNC: #krate::LazyJsFunction<fn(&#krate::JsValue) -> bool> =
+                    __SPEC.resolve_as();
 
                 // Call the function
-                __func.call(__val)
+                __FUNC.call(__val)
             }
 
             #is_type_of_impl
@@ -380,28 +376,6 @@ fn generate_function(
     let rust_name = &func.rust_name;
     let span = rust_name.span();
 
-    // Generate unique function name for registry
-    let registry_name = match &func.kind {
-        ImportFunctionKind::Normal => {
-            if let Some(ref ns) = func.js_namespace {
-                format!("{}::{}", ns.join("."), func.rust_name)
-            } else {
-                func.rust_name.to_string()
-            }
-        }
-        ImportFunctionKind::Method { .. }
-        | ImportFunctionKind::Getter { .. }
-        | ImportFunctionKind::Setter { .. }
-        | ImportFunctionKind::IndexingGetter { .. }
-        | ImportFunctionKind::IndexingSetter { .. }
-        | ImportFunctionKind::IndexingDeleter { .. } => {
-            let class = func.js_class.as_deref().unwrap_or("global");
-            format!("{class}::{rust_name}")
-        }
-        ImportFunctionKind::Constructor { class } => format!("{class}::new"),
-        ImportFunctionKind::StaticMethod { class } => format!("{class}::{rust_name}"),
-    };
-
     // Generate argument lists
     let args = generate_args(func, krate)?;
     let fn_params = &args.fn_params;
@@ -419,7 +393,7 @@ fn generate_function(
     if func.is_async {
         let js_code = generate_js_code(func, vendor_prefixes, prefix, true);
         let js_code_str = js_code.to_arrow_function();
-        return generate_async_function(func, krate, &registry_name, &js_code_str, &args);
+        return generate_async_function(func, krate, &js_code_str, &args);
     }
 
     // For non-async functions, generate a simple closure that returns a constant string
@@ -437,13 +411,11 @@ fn generate_function(
         }
 
         // Look up the function at runtime
-        let __func: #krate::JSFunction<fn(#fn_types) -> #ret_type> =
-            #krate::FUNCTION_REGISTRY
-                .get_function(__SPEC)
-                .expect(concat!("Function not found: ", #registry_name));
+        static __FUNC: #krate::LazyJsFunction<fn(#fn_types) -> #ret_type> =
+            __SPEC.resolve_as();
 
         // Call the function
-        __func.call(#call_values)
+        __FUNC.call(#call_values)
     };
 
     // Get the rust attributes to forward (like #[cfg(...)] and #[doc = "..."])
@@ -537,7 +509,6 @@ fn generate_function(
 fn generate_async_function(
     func: &ImportFunction,
     krate: &TokenStream,
-    registry_name: &str,
     js_code_str: &str,
     args: &GeneratedArgs,
 ) -> syn::Result<TokenStream> {
@@ -563,14 +534,12 @@ fn generate_async_function(
             __SPEC
         }
 
-        // Look up the function at runtime - returns JsValue (the Promise)
-        let __func: #krate::JSFunction<fn(#fn_types) -> #krate::JsValue> =
-            #krate::FUNCTION_REGISTRY
-                .get_function(__SPEC)
-                .expect(concat!("Function not found: ", #registry_name));
+        // Look up the function at runtime
+        static __FUNC: #krate::LazyJsFunction<fn(#fn_types) -> #krate::JsValue> =
+            __SPEC.resolve_as();
 
         // Call the function, get Promise as JsValue
-        let __promise_val = __func.call(#call_values);
+        let __promise_val = __FUNC.call(#call_values);
 
         // Cast to js_sys::Promise and wrap in JsFuture
         let __promise: ::wasm_bindgen_futures::js_sys::Promise =
@@ -932,9 +901,6 @@ fn generate_static(
     let ty = &st.ty;
     let span = rust_name.span();
 
-    // Generate registry name for the static accessor
-    let registry_name = format!("__static_{rust_name}");
-
     // Generate JavaScript code to access the static
     let js_code = generate_static_js_code(st, prefix);
 
@@ -953,14 +919,11 @@ fn generate_static(
             }
 
             fn __init() -> #ty {
-                // Look up the accessor function at runtime
-                let __func: #krate::JSFunction<fn() -> #ty> =
-                    #krate::FUNCTION_REGISTRY
-                        .get_function(__SPEC)
-                        .expect(concat!("Static accessor not found: ", #registry_name));
+                static __FUNC: #krate::LazyJsFunction<fn() -> #ty> =
+                    __SPEC.resolve_as();
 
                 // Call the accessor to get the value
-                __func.call()
+                __FUNC.call()
             }
             #krate::__wry_bindgen_thread_local!(#ty = __init())
         };
