@@ -4,17 +4,43 @@
 //! between Rust and JavaScript. It can be injected into any wry application
 //! to enable wry-bindgen functionality.
 
+use alloc::boxed::Box;
+use alloc::rc::Rc;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 use base64::Engine;
-use std::cell::RefCell;
-use std::rc::Rc;
-use wasm_bindgen::ipc::{DecodedVariant, IPCMessage, MessageType, decode_data};
-use wasm_bindgen::runtime::{AppEvent, get_runtime};
-use wry::RequestAsyncResponder;
+use core::cell::RefCell;
 
-use crate::FunctionRegistry;
+use http::Response;
+
+use crate::function_registry::FUNCTION_REGISTRY;
+use crate::ipc::{DecodedVariant, IPCMessage, MessageType, decode_data};
+use crate::runtime::{AppEvent, AppEventVariant, get_runtime};
+
+/// Responder for wry-bindgen protocol requests.
+pub struct WryBindgenResponder {
+    respond: Box<dyn FnOnce(Response<Vec<u8>>)>,
+}
+
+impl<F> From<F> for WryBindgenResponder
+where
+    F: FnOnce(Response<Vec<u8>>) + 'static,
+{
+    fn from(respond: F) -> Self {
+        Self {
+            respond: Box::new(respond),
+        }
+    }
+}
+
+impl WryBindgenResponder {
+    fn respond(self, response: Response<Vec<u8>>) {
+        (self.respond)(response);
+    }
+}
 
 /// Decode request data from the dioxus-data header.
-fn decode_request_data(request: &wry::http::Request<Vec<u8>>) -> Option<IPCMessage> {
+fn decode_request_data(request: &http::Request<Vec<u8>>) -> Option<IPCMessage> {
     if let Some(header_value) = request.headers().get("dioxus-data") {
         return decode_data(header_value.as_bytes());
     }
@@ -38,7 +64,7 @@ impl Default for WebviewLoadingState {
 /// Shared state for managing async protocol responses.
 #[derive(Default)]
 struct SharedWebviewState {
-    ongoing_request: Option<RequestAsyncResponder>,
+    ongoing_request: Option<WryBindgenResponder>,
     /// How many responses we are waiting for from JS
     pending_js_evaluates: usize,
     /// How many responses JS is waiting for from us
@@ -46,7 +72,7 @@ struct SharedWebviewState {
 }
 
 impl SharedWebviewState {
-    fn set_ongoing_request(&mut self, responder: RequestAsyncResponder) {
+    fn set_ongoing_request(&mut self, responder: WryBindgenResponder) {
         if self.ongoing_request.is_some() {
             panic!(
                 "WARNING: Overwriting existing ongoing_request! Previous request will never be responded to."
@@ -55,7 +81,7 @@ impl SharedWebviewState {
         self.ongoing_request = Some(responder);
     }
 
-    fn take_ongoing_request(&mut self) -> Option<RequestAsyncResponder> {
+    fn take_ongoing_request(&mut self) -> Option<WryBindgenResponder> {
         self.ongoing_request.take()
     }
 
@@ -67,7 +93,7 @@ impl SharedWebviewState {
         if let Some(responder) = self.take_ongoing_request() {
             let body = response.into_data();
             responder.respond(
-                wry::http::Response::builder()
+                http::Response::builder()
                     .status(200)
                     .header("Content-Type", "application/octet-stream")
                     .body(body)
@@ -104,9 +130,16 @@ impl SharedWebviewState {
 /// webview.evaluate_script(wry_bindgen.init_script())?;
 /// ```
 pub struct WryBindgen {
-    function_registry: &'static FunctionRegistry,
+    // State that is shared with the protocol handler closure
     shared: Rc<RefCell<SharedWebviewState>>,
+    // The state of the webview. Either loading (with queued messages) or loaded.
     state: RefCell<WebviewLoadingState>,
+}
+
+impl Default for WryBindgen {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl WryBindgen {
@@ -114,9 +147,8 @@ impl WryBindgen {
     ///
     /// # Arguments
     /// * `function_registry` - Reference to the collected JS function specifications
-    pub fn new(function_registry: &'static FunctionRegistry) -> Self {
+    pub fn new() -> Self {
         Self {
-            function_registry,
             shared: Rc::new(RefCell::new(SharedWebviewState::default())),
             state: RefCell::new(WebviewLoadingState::default()),
         }
@@ -125,8 +157,11 @@ impl WryBindgen {
     /// Get the initialization script that must be evaluated in the webview.
     ///
     /// This script sets up the JavaScript function registry and IPC infrastructure.
-    pub fn init_script(&self) -> &str {
-        self.function_registry.script()
+    fn init_script() -> String {
+        /// The script you need to include in the initialization of your webview.
+        const INITIALIZATION_SCRIPT: &str = include_str!("./js/main.js");
+        let collect_functions = FUNCTION_REGISTRY.script();
+        format!("{INITIALIZATION_SCRIPT}\n{collect_functions}")
     }
 
     /// Create a protocol handler closure suitable for `WebViewBuilder::with_asynchronous_custom_protocol`.
@@ -140,49 +175,50 @@ impl WryBindgen {
     /// # Arguments
     /// * `proxy` - Function to send events to the event loop
     /// * `root_response` - Function that returns the HTML response to serve at "wry://index"
-    pub fn create_protocol_handler<F, H>(
+    pub fn create_protocol_handler<F, R: Into<WryBindgenResponder>>(
         &self,
         proxy: F,
-        root_response: H,
-    ) -> impl Fn(&wry::http::Request<Vec<u8>>, RequestAsyncResponder) + 'static
+    ) -> impl Fn(&http::Request<Vec<u8>>, R) -> Option<R> + 'static
     where
         F: Fn(AppEvent) + 'static,
-        H: Fn() -> wry::http::Response<Vec<u8>> + 'static,
     {
         let shared = self.shared.clone();
-        let function_registry = self.function_registry;
 
-        move |request: &wry::http::Request<Vec<u8>>, responder: RequestAsyncResponder| {
+        move |request: &http::Request<Vec<u8>>, responder: R| {
             let real_path = request.uri().to_string().replace("wry://", "");
             let real_path = real_path.as_str().trim_matches('/');
 
-            if real_path == "index" {
-                responder.respond(root_response());
-                return;
+            if real_path == "init" {
+                let responder = responder.into();
+                responder.respond(module_response(&Self::init_script()));
+                return None;
             }
 
             if real_path == "ready" {
-                proxy(AppEvent::WebviewLoaded);
+                proxy(AppEvent::webview_loaded());
+                let responder = responder.into();
                 responder.respond(blank_response());
-                return;
+                return None;
             }
 
             // Serve inline_js modules from snippets/
             if real_path.starts_with("snippets/") {
-                if let Some(content) = function_registry.get_module(real_path) {
+                let responder = responder.into();
+                if let Some(content) = FUNCTION_REGISTRY.get_module(real_path) {
                     responder.respond(module_response(content));
-                    return;
+                    return None;
                 }
                 responder.respond(not_found_response());
-                return;
+                return None;
             }
 
             // Js sent us either an Evaluate or Respond message
             if real_path == "handler" {
+                let responder = responder.into();
                 let mut shared = shared.borrow_mut();
                 let Some(msg) = decode_request_data(request) else {
                     responder.respond(error_response());
-                    return;
+                    return None;
                 };
                 let msg_type = msg.ty().unwrap();
                 match msg_type {
@@ -204,10 +240,10 @@ impl WryBindgen {
                     }
                 }
                 get_runtime().queue_rust_call(msg);
-                return;
+                return None;
             }
 
-            responder.respond(blank_response());
+            Some(responder)
         }
     }
 
@@ -219,17 +255,21 @@ impl WryBindgen {
     /// # Arguments
     /// * `event` - The AppEvent to handle
     /// * `webview` - Reference to the webview for script evaluation
-    pub fn handle_user_event(&self, event: AppEvent, webview: &wry::WebView) -> Option<i32> {
-        match event {
-            AppEvent::Shutdown(status) => {
+    pub fn handle_user_event(
+        &self,
+        event: AppEvent,
+        evaluate_script: impl FnOnce(&str),
+    ) -> Option<i32> {
+        match event.into_variant() {
+            AppEventVariant::Shutdown(status) => {
                 return Some(status);
             }
-            AppEvent::RunOnMainThread(task) => {
+            AppEventVariant::RunOnMainThread(task) => {
                 task.execute();
                 return None;
             }
             // The rust thread sent us an IPCMessage to send to JS
-            AppEvent::Ipc(ipc_msg) => {
+            AppEventVariant::Ipc(ipc_msg) => {
                 {
                     let mut state = self.state.borrow_mut();
                     if let WebviewLoadingState::Pending { queued } = &mut *state {
@@ -268,10 +308,10 @@ impl WryBindgen {
                     let engine = base64::engine::general_purpose::STANDARD;
                     let data_base64 = engine.encode(ipc_msg.data());
                     let code = format!("window.evaluate_from_rust_binary(\"{data_base64}\")");
-                    webview.evaluate_script(&code).unwrap();
+                    evaluate_script(&code);
                 }
             }
-            AppEvent::WebviewLoaded => {
+            AppEventVariant::WebviewLoaded => {
                 let mut state = self.state.borrow_mut();
                 if let WebviewLoadingState::Pending { queued } =
                     std::mem::replace(&mut *state, WebviewLoadingState::Loaded)
@@ -287,33 +327,34 @@ impl WryBindgen {
 }
 
 /// Create a blank HTTP response.
-pub fn blank_response() -> wry::http::Response<Vec<u8>> {
-    wry::http::Response::builder()
+pub fn blank_response() -> http::Response<Vec<u8>> {
+    http::Response::builder()
         .status(200)
         .body(vec![])
         .expect("Failed to build blank response")
 }
 
 /// Create an error HTTP response.
-pub fn error_response() -> wry::http::Response<Vec<u8>> {
-    wry::http::Response::builder()
+pub fn error_response() -> http::Response<Vec<u8>> {
+    http::Response::builder()
         .status(400)
         .body(vec![])
         .expect("Failed to build error response")
 }
 
 /// Create a JavaScript module HTTP response.
-pub fn module_response(content: &str) -> wry::http::Response<Vec<u8>> {
-    wry::http::Response::builder()
+pub fn module_response(content: &str) -> http::Response<Vec<u8>> {
+    http::Response::builder()
         .status(200)
         .header("Content-Type", "application/javascript")
+        .header("access-control-allow-origin", "*")
         .body(content.as_bytes().to_vec())
         .expect("Failed to build module response")
 }
 
 /// Create a not found HTTP response.
-pub fn not_found_response() -> wry::http::Response<Vec<u8>> {
-    wry::http::Response::builder()
+pub fn not_found_response() -> http::Response<Vec<u8>> {
+    http::Response::builder()
         .status(404)
         .body(b"Not Found".to_vec())
         .expect("Failed to build not found response")
