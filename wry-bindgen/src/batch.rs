@@ -6,7 +6,7 @@
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
-use crate::DecodedData;
+use crate::ipc::DecodedData;
 use crate::encode::{BatchableResult, BinaryDecode};
 use crate::ipc::{EncodedData, IPCMessage, MessageType};
 use crate::runtime::get_runtime;
@@ -272,7 +272,7 @@ pub(crate) fn flush_and_then<R>(then: impl for<'a> Fn(DecodedData<'a>) -> R) -> 
 
     // Send and wait for result
     let runtime = get_runtime();
-    (runtime.proxy)(AppEvent::Ipc(batch_msg));
+    (runtime.proxy)(AppEvent::ipc(batch_msg));
     loop {
         if let Some(result) = crate::runtime::progress_js_with(&then) {
             return result;

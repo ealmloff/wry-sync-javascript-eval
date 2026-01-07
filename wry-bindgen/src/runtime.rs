@@ -13,10 +13,10 @@ use spin::RwLock;
 
 use slotmap::{DefaultKey, KeyData};
 
-use crate::MessageType;
 use crate::function::{
     CALL_EXPORT_FN_ID, DROP_NATIVE_REF_FN_ID, RustCallback, THREAD_LOCAL_OBJECT_ENCODER,
 };
+use crate::ipc::MessageType;
 use crate::ipc::{DecodedData, DecodedVariant, IPCMessage};
 use crate::wry::WryBindgen;
 
@@ -25,7 +25,40 @@ use crate::wry::WryBindgen;
 /// This enum wraps both IPC messages from JavaScript and control messages
 /// from the application (like shutdown requests).
 #[derive(Debug)]
-pub enum AppEvent {
+pub struct AppEvent {
+    event: AppEventVariant,
+}
+
+impl AppEvent {
+    /// Create a new IPC event.
+    pub(crate) fn ipc(msg: IPCMessage) -> Self {
+        Self {
+            event: AppEventVariant::Ipc(msg),
+        }
+    }
+
+    /// Create a new webview loaded event.
+    pub(crate) fn webview_loaded() -> Self {
+        Self {
+            event: AppEventVariant::WebviewLoaded,
+        }
+    }
+
+    /// Create a new shutdown event with the given status code.
+    pub(crate) fn shutdown(status: i32) -> Self {
+        Self {
+            event: AppEventVariant::Shutdown(status),
+        }
+    }
+
+    /// Consume the event and return the inner variant.
+    pub(crate) fn into_variant(self) -> AppEventVariant {
+        self.event
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum AppEventVariant {
     /// An IPC message from JavaScript
     Ipc(IPCMessage),
     /// The webview has finished loading
@@ -40,7 +73,7 @@ pub struct IPCSenders {
 }
 
 impl IPCSenders {
-    pub fn start_send(&self, msg: IPCMessage) {
+    pub(crate) fn start_send(&self, msg: IPCMessage) {
         match msg.ty().unwrap() {
             MessageType::Evaluate => {
                 self.eval_sender
@@ -94,7 +127,7 @@ pub struct WryRuntime {
 
 impl WryRuntime {
     /// Create a new runtime with the given event loop proxy.
-    pub fn new(proxy: Box<dyn Fn(AppEvent) + Send + Sync>) -> Self {
+    pub(crate) fn new(proxy: Box<dyn Fn(AppEvent) + Send + Sync>) -> Self {
         let (eval_sender, eval_receiver) = async_channel::unbounded();
         let (respond_sender, respond_receiver) = futures_channel::mpsc::unbounded();
         let senders = IPCSenders {
@@ -113,17 +146,17 @@ impl WryRuntime {
     }
 
     /// Send a response back to JavaScript.
-    pub fn js_response(&self, responder: IPCMessage) {
-        (self.proxy)(AppEvent::Ipc(responder));
+    pub(crate) fn js_response(&self, responder: IPCMessage) {
+        (self.proxy)(AppEvent::ipc(responder));
     }
 
     /// Request the application to shut down with a status code.
     pub fn shutdown(&self, status: i32) {
-        (self.proxy)(AppEvent::Shutdown(status));
+        (self.proxy)(AppEvent::shutdown(status));
     }
 
     /// Queue a Rust call from JavaScript.
-    pub fn queue_rust_call(&self, responder: IPCMessage) {
+    pub(crate) fn queue_rust_call(&self, responder: IPCMessage) {
         self.senders.start_send(responder);
     }
 }

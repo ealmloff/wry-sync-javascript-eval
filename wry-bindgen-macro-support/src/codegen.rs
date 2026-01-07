@@ -1039,7 +1039,7 @@ fn generate_string_enum(string_enum: &StringEnum, krate: &TokenStream) -> syn::R
     let binary_encode_impl = quote! {
         impl #krate::BinaryEncode for #enum_name {
             fn encode(self, encoder: &mut #krate::EncodedData) {
-                encoder.push_u32(self as u32);
+                <u32 as #krate::BinaryEncode>::encode(self as u32, encoder);
             }
         }
     };
@@ -1048,7 +1048,7 @@ fn generate_string_enum(string_enum: &StringEnum, krate: &TokenStream) -> syn::R
     let binary_decode_impl = quote! {
         impl #krate::BinaryDecode for #enum_name {
             fn decode(decoder: &mut #krate::DecodedData) -> ::core::result::Result<Self, #krate::DecodeError> {
-                let discriminant = decoder.take_u32()?;
+                let discriminant = <u32 as #krate::BinaryDecode>::decode(decoder)?;
                 match discriminant {
                     #(#variant_indices => ::core::result::Result::Ok(#variant_paths),)*
                     _ => ::core::result::Result::Ok(#enum_name::__Invalid),

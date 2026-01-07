@@ -15,7 +15,7 @@ use http::Response;
 
 use crate::function_registry::FUNCTION_REGISTRY;
 use crate::ipc::{DecodedVariant, IPCMessage, MessageType, decode_data};
-use crate::runtime::{AppEvent, get_runtime};
+use crate::runtime::{AppEvent, AppEventVariant, get_runtime};
 
 /// Responder for wry-bindgen protocol requests.
 pub struct WryBindgenResponder {
@@ -189,7 +189,7 @@ impl WryBindgen {
             }
 
             if real_path == "ready" {
-                proxy(AppEvent::WebviewLoaded);
+                proxy(AppEvent::webview_loaded());
                 let responder = responder.into();
                 responder.respond(blank_response());
                 return None;
@@ -254,12 +254,12 @@ impl WryBindgen {
         event: AppEvent,
         evaluate_script: impl FnOnce(&str),
     ) -> Option<i32> {
-        match event {
-            AppEvent::Shutdown(status) => {
+        match event.into_variant() {
+            AppEventVariant::Shutdown(status) => {
                 return Some(status);
             }
             // The rust thread sent us an IPCMessage to send to JS
-            AppEvent::Ipc(ipc_msg) => {
+            AppEventVariant::Ipc(ipc_msg) => {
                 {
                     let mut state = self.state.borrow_mut();
                     if let WebviewLoadingState::Pending { queued } = &mut *state {
@@ -301,7 +301,7 @@ impl WryBindgen {
                     evaluate_script(&code);
                 }
             }
-            AppEvent::WebviewLoaded => {
+            AppEventVariant::WebviewLoaded => {
                 let mut state = self.state.borrow_mut();
                 if let WebviewLoadingState::Pending { queued } =
                     std::mem::replace(&mut *state, WebviewLoadingState::Loaded)

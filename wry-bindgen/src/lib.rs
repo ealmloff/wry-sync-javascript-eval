@@ -443,7 +443,7 @@ pub use batch::batch;
 pub use encode::{BatchableResult, BinaryDecode, BinaryEncode, EncodeTypeDef};
 pub use function::JSFunction;
 pub use ipc::{
-    DecodeError, DecodedData, DecodedVariant, EncodedData, IPCMessage, MessageType, decode_data,
+    DecodeError, DecodedData, EncodedData,
 };
 pub use runtime::{WryRuntime, start_app};
 
