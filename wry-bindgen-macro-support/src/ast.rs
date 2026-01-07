@@ -163,17 +163,17 @@ pub enum ImportFunctionKind {
         /// Property name (may differ from function name)
         property: String,
     },
-    /// Indexing getter (e.g., obj[index])
+    /// Indexing getter (e.g., `obj[index]`)
     IndexingGetter {
         /// The receiver type
         receiver: Type,
     },
-    /// Indexing setter (e.g., obj[index] = value)
+    /// Indexing setter (e.g., `obj[index] = value`)
     IndexingSetter {
         /// The receiver type
         receiver: Type,
     },
-    /// Indexing deleter (e.g., delete obj[index])
+    /// Indexing deleter (e.g., `delete obj[index]`)
     IndexingDeleter {
         /// The receiver type
         receiver: Type,

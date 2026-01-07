@@ -9,12 +9,12 @@
 //!
 //! - [`ipc`] - Binary IPC protocol types for message encoding/decoding
 //! - [`encode`] - Core encoding/decoding traits for Rust types
-//! - [`value`] - JsValue type representing JavaScript heap references
+//! - `value` - JsValue type representing JavaScript heap references
 //! - [`function`] - JSFunction type for calling JavaScript functions
 //! - [`batch`] - Batching system for grouping multiple JS operations
 //! - [`runtime`] - Event loop and runtime management
-//! - [`cast`] - Type casting trait for JavaScript types
-//! - [`lazy`] - Lazy initialization for global JavaScript values
+//! - `cast` - Type casting trait for JavaScript types
+//! - `lazy` - Lazy initialization for global JavaScript values
 
 #![no_std]
 
@@ -540,7 +540,7 @@ pub static FUNCTION_REGISTRY: Lazy<FunctionRegistry> =
 /// Generate argument names for JS function (a0, a1, a2, ...)
 fn generate_args(count: usize) -> String {
     (0..count)
-        .map(|i| format!("a{}", i))
+        .map(|i| format!("a{i}"))
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -554,7 +554,7 @@ impl FunctionRegistry {
         // Collect all inline JS modules and deduplicate by content hash
         for inline_js in inventory::iter::<InlineJsModule>() {
             let hash = inline_js.hash();
-            let module_path = format!("snippets/{}.js", hash);
+            let module_path = format!("snippets/{hash}.js");
             // Only insert if we haven't seen this content before
             modules.entry(module_path).or_insert(inline_js.content);
         }
@@ -579,8 +579,7 @@ impl FunctionRegistry {
                 // Dynamically import the module from wry://snippets/{hash}.js
                 writeln!(
                     &mut script,
-                    "  const module_{} = await import('wry://snippets/{}.js');",
-                    hash, hash
+                    "  const module_{hash} = await import('wry://snippets/{hash}.js');"
                 )
                 .unwrap();
             }
@@ -594,7 +593,7 @@ impl FunctionRegistry {
                 script.push_str(",\n");
             }
             let js_code = (spec.js_code)();
-            write!(&mut script, "{}", js_code).unwrap();
+            write!(&mut script, "{js_code}").unwrap();
         }
         script.push_str("]);\n");
 
@@ -630,8 +629,7 @@ impl FunctionRegistry {
       const handle = this.__handle;
       this.__handle = 0;
       if (handle !== 0) window.__wryCallExport("{class_name}::__drop", handle);
-    }}"#,
-                class_name = class_name
+    }}"#
             )
             .unwrap();
 
@@ -648,7 +646,7 @@ impl FunctionRegistry {
                         // Instance method
                         let args = generate_args(member.arg_count);
                         let args_with_handle = if member.arg_count > 0 {
-                            format!("this.__handle, {}", args)
+                            format!("this.__handle, {args}")
                         } else {
                             "this.__handle".to_string()
                         };
@@ -747,7 +745,7 @@ impl FunctionRegistry {
             }
 
             // Register class on window
-            writeln!(&mut script, "  window.{} = {};", class_name, class_name).unwrap();
+            writeln!(&mut script, "  window.{class_name} = {class_name};").unwrap();
         }
 
         // Send a request to wry to notify that the function registry is ready
@@ -837,7 +835,7 @@ pub fn throw_str(message: &str) -> ! {
 #[cold]
 #[inline(never)]
 pub fn throw_val(s: JsValue) -> ! {
-    panic!("{:?}", s);
+    panic!("{s:?}");
 }
 
 // Re-export extract_rust_handle from js_helpers

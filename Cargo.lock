@@ -6325,6 +6325,7 @@ dependencies = [
  "winit",
  "wry",
  "wry-bindgen-macro",
+ "x11-dl",
 ]
 
 [[package]]

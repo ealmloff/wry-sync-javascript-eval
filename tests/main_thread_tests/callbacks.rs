@@ -25,7 +25,7 @@ pub(crate) async fn test_call_callback_async() {
 
     let (mut result_tx, mut result_rx) = futures_channel::mpsc::unbounded();
     let callback = Closure::new(move |x: u32| {
-        println!("Callback called with value: {}", x);
+        println!("Callback called with value: {x}");
         result_tx.start_send(x + 1).unwrap();
     });
     println!("Calling calls_callback_async");
@@ -59,7 +59,7 @@ pub(crate) async fn test_join_many_callbacks_async() {
     }
     while let Some(Ok(result)) = futures.next().await {
         let Some(index) = expected.iter().position(|&x| x == result) else {
-            println!("Unexpected result: {:?}", result);
+            println!("Unexpected result: {result:?}");
             std::future::pending::<()>().await;
             break;
         };
