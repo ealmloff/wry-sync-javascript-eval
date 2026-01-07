@@ -3,13 +3,9 @@
 //! This module handles the connection between the Rust runtime and the
 //! JavaScript environment via winit's event loop.
 
-use core::cell::RefCell;
 use core::pin::Pin;
-use std::rc::Rc;
-use std::sync::OnceLock;
 
 use alloc::boxed::Box;
-use alloc::vec::Vec;
 use async_channel::{Receiver, Sender};
 use futures_util::{FutureExt, StreamExt};
 use once_cell::sync::OnceCell;
@@ -91,17 +87,27 @@ impl IPCReceivers {
 /// WebView and manages queued Rust calls.
 pub struct WryRuntime {
     pub proxy: Box<dyn Fn(AppEvent) + Send + Sync>,
-    pub(crate) queued_rust_calls: RwLock<Vec<IPCMessage>>,
-    pub(crate) senders: OnceLock<IPCSenders>,
+    pub(crate) senders: IPCSenders,
+    receivers: RwLock<IPCReceivers>,
 }
 
 impl WryRuntime {
     /// Create a new runtime with the given event loop proxy.
     pub fn new(proxy: Box<dyn Fn(AppEvent) + Send + Sync>) -> Self {
+        let (eval_sender, eval_receiver) = async_channel::unbounded();
+        let (respond_sender, respond_receiver) = futures_channel::mpsc::unbounded();
+        let senders = IPCSenders {
+            eval_sender,
+            respond_sender,
+        };
+        let receivers = RwLock::new(IPCReceivers {
+            eval_receiver: Box::pin(eval_receiver),
+            respond_receiver,
+        });
         Self {
             proxy,
-            queued_rust_calls: RwLock::new(Vec::new()),
-            senders: OnceLock::new(),
+            senders,
+            receivers,
         }
     }
 
@@ -117,23 +123,7 @@ impl WryRuntime {
 
     /// Queue a Rust call from JavaScript.
     pub fn queue_rust_call(&self, responder: IPCMessage) {
-        if let Some(senders) = self.senders.get() {
-            senders.start_send(responder);
-        } else {
-            self.queued_rust_calls.write().push(responder);
-        }
-    }
-
-    /// Set the sender for Rust calls and flush any queued calls.
-    pub fn set_sender(&self, senders: IPCSenders) {
-        self.senders
-            .set(senders)
-            .unwrap_or_else(|_| panic!("Sender already set"));
-        let mut queued = self.queued_rust_calls.write();
-        let senders = self.senders.get().expect("Senders not set");
-        for call in queued.drain(..) {
-            senders.start_send(call);
-        }
+        self.senders.start_send(responder);
     }
 }
 
@@ -163,30 +153,12 @@ pub fn get_runtime() -> &'static WryRuntime {
     RUNTIME.get().expect("Event loop proxy not set")
 }
 
-thread_local! {
-    static THREAD_LOCAL_RECEIVER: Rc<RefCell<IPCReceivers>> = Rc::new(RefCell::new({
-        let runtime = get_runtime();
-        let (eval_sender, eval_receiver) = async_channel::unbounded();
-        let (respond_sender, respond_receiver) = futures_channel::mpsc::unbounded();
-        let senders = IPCSenders {
-            eval_sender,
-            respond_sender,
-        };
-        runtime.set_sender(senders);
-        IPCReceivers {
-            eval_receiver: Box::pin(eval_receiver),
-            respond_receiver,
-        }
-    }));
-}
-
-pub(crate) fn progress_js_with<O>(with_respond: impl for<'a> Fn(DecodedData<'a>) -> O) -> Option<O> {
+pub(crate) fn progress_js_with<O>(
+    with_respond: impl for<'a> Fn(DecodedData<'a>) -> O,
+) -> Option<O> {
     let runtime = get_runtime();
 
-    let response = THREAD_LOCAL_RECEIVER
-        .with(|receiver| receiver.clone())
-        .borrow_mut()
-        .recv_blocking();
+    let response = get_runtime().receivers.write().recv_blocking();
 
     let decoder = response.decoded().expect("Failed to decode response");
     match decoder {
@@ -200,7 +172,7 @@ pub(crate) fn progress_js_with<O>(with_respond: impl for<'a> Fn(DecodedData<'a>)
 
 pub async fn poll_callbacks() {
     let runtime = get_runtime();
-    let receiver = THREAD_LOCAL_RECEIVER.with(|receiver| receiver.borrow().eval_receiver.clone());
+    let receiver = get_runtime().receivers.read().eval_receiver.clone();
 
     while let Ok(response) = receiver.recv().await {
         let decoder = response.decoded().expect("Failed to decode response");

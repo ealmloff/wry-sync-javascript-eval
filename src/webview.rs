@@ -55,7 +55,7 @@ impl ApplicationHandler<AppEvent> for State {
         let webview = WebViewBuilder::new()
             .with_devtools(true)
             .with_asynchronous_custom_protocol("wry".into(), move |_, request, responder| {
-                protocol_handler(&request, responder);
+                protocol_handler(&request, |response| responder.respond(response));
             })
             .with_url("wry://index")
             .build_as_child(&window)

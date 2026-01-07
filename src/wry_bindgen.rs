@@ -8,12 +8,35 @@ use base64::Engine;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use wry::RequestAsyncResponder;
+use http::Response;
+use wry::http;
 
 use wasm_bindgen::ipc::{DecodedVariant, IPCMessage, MessageType, decode_data};
 use wasm_bindgen::runtime::{AppEvent, get_runtime};
 
 use crate::FunctionRegistry;
+
+/// Responder for wry-bindgen protocol requests.
+pub struct WryBindgenResponder {
+    respond: Box<dyn FnOnce(Response<Vec<u8>>)>,
+}
+
+impl<F> From<F> for WryBindgenResponder
+where
+    F: FnOnce(Response<Vec<u8>>) + 'static,
+{
+    fn from(respond: F) -> Self {
+        Self {
+            respond: Box::new(respond),
+        }
+    }
+}
+
+impl WryBindgenResponder {
+    fn respond(self, response: Response<Vec<u8>>) {
+        (self.respond)(response);
+    }
+}
 
 /// Decode request data from the dioxus-data header.
 fn decode_request_data(request: &wry::http::Request<Vec<u8>>) -> Option<IPCMessage> {
@@ -40,7 +63,7 @@ impl Default for WebviewLoadingState {
 /// Shared state for managing async protocol responses.
 #[derive(Default)]
 struct SharedWebviewState {
-    ongoing_request: Option<RequestAsyncResponder>,
+    ongoing_request: Option<WryBindgenResponder>,
     /// How many responses we are waiting for from JS
     pending_js_evaluates: usize,
     /// How many responses JS is waiting for from us
@@ -48,7 +71,7 @@ struct SharedWebviewState {
 }
 
 impl SharedWebviewState {
-    fn set_ongoing_request(&mut self, responder: RequestAsyncResponder) {
+    fn set_ongoing_request(&mut self, responder: WryBindgenResponder) {
         if self.ongoing_request.is_some() {
             panic!(
                 "WARNING: Overwriting existing ongoing_request! Previous request will never be responded to."
@@ -57,7 +80,7 @@ impl SharedWebviewState {
         self.ongoing_request = Some(responder);
     }
 
-    fn take_ongoing_request(&mut self) -> Option<RequestAsyncResponder> {
+    fn take_ongoing_request(&mut self) -> Option<WryBindgenResponder> {
         self.ongoing_request.take()
     }
 
@@ -142,19 +165,20 @@ impl WryBindgen {
     /// # Arguments
     /// * `proxy` - Function to send events to the event loop
     /// * `root_response` - Function that returns the HTML response to serve at "wry://index"
-    pub fn create_protocol_handler<F, H>(
+    pub fn create_protocol_handler<F, H, R: Into<WryBindgenResponder>>(
         &self,
         proxy: F,
         root_response: H,
-    ) -> impl Fn(&wry::http::Request<Vec<u8>>, RequestAsyncResponder) + 'static
+    ) -> impl Fn(&http::Request<Vec<u8>>, R) + 'static
     where
         F: Fn(AppEvent) + 'static,
-        H: Fn() -> wry::http::Response<Vec<u8>> + 'static,
+        H: Fn() -> http::Response<Vec<u8>> + 'static,
     {
         let shared = self.shared.clone();
         let function_registry = self.function_registry;
 
-        move |request: &wry::http::Request<Vec<u8>>, responder: RequestAsyncResponder| {
+        move |request: &http::Request<Vec<u8>>, responder: R| {
+            let responder = responder.into();
             let real_path = request.uri().to_string().replace("wry://", "");
             let real_path = real_path.as_str().trim_matches('/');
 
