@@ -101,6 +101,17 @@ fn main() {
         test_with_js_context(jsvalue::test_instanceof_dyn_into).await;
         test_with_js_context(jsvalue::test_instanceof_dyn_ref).await;
 
+        // Stable API additions tests
+        test_with_js_context(jsvalue::test_partial_eq_bool).await;
+        test_with_js_context(jsvalue::test_partial_eq_numbers).await;
+        test_with_js_context(jsvalue::test_partial_eq_strings).await;
+        test_with_js_context(jsvalue::test_try_from_f64).await;
+        test_with_js_context(jsvalue::test_try_from_string).await;
+        test_with_js_context(jsvalue::test_owned_arithmetic_operators).await;
+        test_with_js_context(jsvalue::test_owned_bitwise_operators).await;
+        test_with_js_context(jsvalue::test_jscast_as_ref).await;
+        test_with_js_context(jsvalue::test_as_ref_jsvalue).await;
+
         // String enum tests
         test_with_js_context(string_enum::test_string_enum_from_str).await;
         test_with_js_context(string_enum::test_string_enum_to_str).await;
