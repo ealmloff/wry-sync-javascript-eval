@@ -13,6 +13,7 @@ mod jsvalue;
 mod module_import;
 mod reentrant_callbacks;
 mod roundtrip;
+mod run_on_main_thread;
 mod string_enum;
 mod structs;
 mod thread_local;
@@ -109,6 +110,17 @@ fn main() {
         test_with_js_context(jsvalue::test_instanceof_dyn_into).await;
         test_with_js_context(jsvalue::test_instanceof_dyn_ref).await;
 
+        // Stable API additions tests
+        test_with_js_context(jsvalue::test_partial_eq_bool).await;
+        test_with_js_context(jsvalue::test_partial_eq_numbers).await;
+        test_with_js_context(jsvalue::test_partial_eq_strings).await;
+        test_with_js_context(jsvalue::test_try_from_f64).await;
+        test_with_js_context(jsvalue::test_try_from_string).await;
+        test_with_js_context(jsvalue::test_owned_arithmetic_operators).await;
+        test_with_js_context(jsvalue::test_owned_bitwise_operators).await;
+        test_with_js_context(jsvalue::test_jscast_as_ref).await;
+        test_with_js_context(jsvalue::test_as_ref_jsvalue).await;
+
         // String enum tests
         test_with_js_context(string_enum::test_string_enum_from_str).await;
         test_with_js_context(string_enum::test_string_enum_to_str).await;
@@ -168,6 +180,10 @@ fn main() {
         async_test_with_js_context(async_bindings::test_async_method_with_catch).await;
         async_test_with_js_context(async_bindings::test_async_static_method).await;
         async_test_with_js_context(async_bindings::test_join_many_async).await;
+
+        // run_on_main_thread tests
+        test_with_js_context(run_on_main_thread::test_run_on_main_thread_basic).await;
+        test_with_js_context(run_on_main_thread::test_run_on_main_thread_verifies_thread).await;
     })
     .unwrap();
 }

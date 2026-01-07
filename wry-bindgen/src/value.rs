@@ -37,7 +37,8 @@ pub(crate) const JSIDX_RESERVED: u64 = JSIDX_OFFSET + 4;
 /// Unlike wasm-bindgen which runs in a single-threaded Wasm environment,
 /// this implementation uses the IPC protocol to communicate with JS.
 pub struct JsValue {
-    idx: u64,
+    #[doc(hidden)]
+    pub idx: u64,
 }
 
 impl JsValue {
@@ -117,13 +118,14 @@ impl JsValue {
     }
 
     /// Creates a JS string from a Rust string.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> JsValue {
-        s.try_into().unwrap()
+        s.into()
     }
 
     /// Creates a JS number from an f64.
     pub fn from_f64(n: f64) -> JsValue {
-        n.try_into().unwrap()
+        n.into()
     }
 }
 
@@ -171,8 +173,71 @@ impl PartialEq<JsValue> for &str {
     }
 }
 
-impl PartialEq<u32> for JsValue {
-    fn eq(&self, other: &u32) -> bool {
+impl PartialEq<str> for JsValue {
+    fn eq(&self, other: &str) -> bool {
+        match self.as_string() {
+            Some(s) => s == other,
+            None => false,
+        }
+    }
+}
+
+impl PartialEq<String> for JsValue {
+    fn eq(&self, other: &String) -> bool {
+        match self.as_string() {
+            Some(s) => &s == other,
+            None => false,
+        }
+    }
+}
+
+impl PartialEq<JsValue> for String {
+    fn eq(&self, other: &JsValue) -> bool {
+        match other.as_string() {
+            Some(s) => self == &s,
+            None => false,
+        }
+    }
+}
+
+impl PartialEq<&String> for JsValue {
+    fn eq(&self, other: &&String) -> bool {
+        match self.as_string() {
+            Some(s) => &s == *other,
+            None => false,
+        }
+    }
+}
+
+impl PartialEq<JsValue> for &String {
+    fn eq(&self, other: &JsValue) -> bool {
+        match other.as_string() {
+            Some(s) => *self == &s,
+            None => false,
+        }
+    }
+}
+
+impl PartialEq<bool> for JsValue {
+    fn eq(&self, other: &bool) -> bool {
+        match self.as_bool() {
+            Some(b) => b == *other,
+            None => false,
+        }
+    }
+}
+
+impl PartialEq<JsValue> for bool {
+    fn eq(&self, other: &JsValue) -> bool {
+        match other.as_bool() {
+            Some(b) => *self == b,
+            None => false,
+        }
+    }
+}
+
+impl PartialEq<f32> for JsValue {
+    fn eq(&self, other: &f32) -> bool {
         match self.as_f64() {
             Some(n) => n == (*other as f64),
             None => false,
@@ -180,7 +245,7 @@ impl PartialEq<u32> for JsValue {
     }
 }
 
-impl PartialEq<JsValue> for u32 {
+impl PartialEq<JsValue> for f32 {
     fn eq(&self, other: &JsValue) -> bool {
         match other.as_f64() {
             Some(n) => (*self as f64) == n,
@@ -188,6 +253,53 @@ impl PartialEq<JsValue> for u32 {
         }
     }
 }
+
+impl PartialEq<f64> for JsValue {
+    fn eq(&self, other: &f64) -> bool {
+        match self.as_f64() {
+            Some(n) => n == *other,
+            None => false,
+        }
+    }
+}
+
+impl PartialEq<JsValue> for f64 {
+    fn eq(&self, other: &JsValue) -> bool {
+        match other.as_f64() {
+            Some(n) => *self == n,
+            None => false,
+        }
+    }
+}
+
+// Macro for integer PartialEq implementations
+macro_rules! impl_partial_eq_int {
+    ($($t:ty),*) => {
+        $(
+            impl PartialEq<$t> for JsValue {
+                fn eq(&self, other: &$t) -> bool {
+                    match self.as_f64() {
+                        Some(n) => n == (*other as f64),
+                        None => false,
+                    }
+                }
+            }
+
+            impl PartialEq<JsValue> for $t {
+                fn eq(&self, other: &JsValue) -> bool {
+                    match other.as_f64() {
+                        Some(n) => (*self as f64) == n,
+                        None => false,
+                    }
+                }
+            }
+        )*
+    };
+}
+
+impl_partial_eq_int!(
+    i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize
+);
 
 impl fmt::Debug for JsValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -424,9 +536,10 @@ impl Neg for &JsValue {
 }
 
 impl Not for &JsValue {
-    type Output = JsValue;
-    fn not(self) -> JsValue {
-        JsValue::bit_not(self)
+    type Output = bool;
+
+    fn not(self) -> Self::Output {
+        JsValue::is_falsy(self)
     }
 }
 
@@ -500,35 +613,62 @@ impl Rem<&JsValue> for &JsValue {
     }
 }
 
+impl Neg for JsValue {
+    type Output = JsValue;
+    fn neg(self) -> JsValue {
+        JsValue::neg(&self)
+    }
+}
+
+impl Not for JsValue {
+    type Output = bool;
+    fn not(self) -> Self::Output {
+        JsValue::is_falsy(&self)
+    }
+}
+
+// Macro for binary operators with all ownership combinations
+macro_rules! impl_binary_op {
+    ($trait:ident, $method:ident, $js_method:ident) => {
+        // JsValue op JsValue
+        impl $trait for JsValue {
+            type Output = JsValue;
+            fn $method(self, rhs: JsValue) -> JsValue {
+                JsValue::$js_method(&self, &rhs)
+            }
+        }
+
+        // JsValue op &JsValue
+        impl $trait<&JsValue> for JsValue {
+            type Output = JsValue;
+            fn $method(self, rhs: &JsValue) -> JsValue {
+                JsValue::$js_method(&self, rhs)
+            }
+        }
+
+        // &JsValue op JsValue
+        impl<'a> $trait<JsValue> for &'a JsValue {
+            type Output = JsValue;
+            fn $method(self, rhs: JsValue) -> JsValue {
+                JsValue::$js_method(self, &rhs)
+            }
+        }
+    };
+}
+
+impl_binary_op!(Add, add, add);
+impl_binary_op!(Sub, sub, sub);
+impl_binary_op!(Mul, mul, mul);
+impl_binary_op!(Div, div, div);
+impl_binary_op!(Rem, rem, rem);
+impl_binary_op!(BitAnd, bitand, bit_and);
+impl_binary_op!(BitOr, bitor, bit_or);
+impl_binary_op!(BitXor, bitxor, bit_xor);
+impl_binary_op!(Shl, shl, shl);
+impl_binary_op!(Shr, shr, shr);
+
 impl From<bool> for JsValue {
     fn from(val: bool) -> Self {
         JsValue::from_bool(val)
-    }
-}
-
-// JsCast for Infallible (used as error type in TryFrom)
-impl AsRef<JsValue> for core::convert::Infallible {
-    fn as_ref(&self) -> &JsValue {
-        match *self {}
-    }
-}
-
-impl From<core::convert::Infallible> for JsValue {
-    fn from(val: core::convert::Infallible) -> Self {
-        match val {}
-    }
-}
-
-impl crate::JsCast for core::convert::Infallible {
-    fn instanceof(_val: &JsValue) -> bool {
-        true
-    }
-
-    fn unchecked_from_js(_val: JsValue) -> Self {
-        unreachable!("Infallible can never be constructed")
-    }
-
-    fn unchecked_from_js_ref(_val: &JsValue) -> &Self {
-        unreachable!("Infallible can never be constructed")
     }
 }

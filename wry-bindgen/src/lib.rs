@@ -7,14 +7,10 @@
 //!
 //! The crate is organized into several modules:
 //!
-//! - [`ipc`] - Binary IPC protocol types for message encoding/decoding
 //! - [`encode`] - Core encoding/decoding traits for Rust types
-//! - [`value`] - JsValue type representing JavaScript heap references
 //! - [`function`] - JSFunction type for calling JavaScript functions
-//! - [`batch`] - Batching system for grouping multiple JS operations
+//! - [`mod@batch`] - Batching system for grouping multiple JS operations
 //! - [`runtime`] - Event loop and runtime management
-//! - [`cast`] - Type casting trait for JavaScript types
-//! - [`lazy`] - Lazy initialization for global JavaScript values
 
 #![no_std]
 
@@ -27,13 +23,15 @@ mod cast;
 pub mod convert;
 pub mod encode;
 pub mod function;
+mod function_registry;
 mod intern;
-pub mod ipc;
+pub(crate) mod ipc;
 mod js_helpers;
 mod lazy;
 pub mod object_store;
 pub mod runtime;
 mod value;
+pub mod wry;
 
 pub use intern::*;
 
@@ -44,20 +42,13 @@ pub mod closure {
     pub use crate::WasmClosure;
 }
 
-/// The identity cast function spec - registered once and reused by wbg_cast.
-/// This is the JS function `(a0) => a0` that passes values through unchanged.
-/// Type conversion is handled by Rust's encode/decode based on the type parameters.
-pub static IDENTITY_CAST_SPEC: JsFunctionSpec =
-    JsFunctionSpec::new(|| alloc::string::String::from("(a0) => a0"));
-
-inventory::submit! {
-    IDENTITY_CAST_SPEC
-}
-
 /// Runtime module for wasm-bindgen compatibility.
 /// This module provides the wbg_cast function used for type casting.
 pub mod __rt {
-    use crate::encode::{BatchableResult, BinaryEncode, EncodeTypeDef};
+    use crate::{
+        JsFunctionSpec, LazyJsFunction,
+        encode::{BatchableResult, BinaryEncode, EncodeTypeDef},
+    };
 
     /// Cast between types via the binary protocol.
     ///
@@ -70,9 +61,17 @@ pub mod __rt {
         From: BinaryEncode + EncodeTypeDef,
         To: BatchableResult + EncodeTypeDef,
     {
-        let func: crate::JSFunction<fn(From) -> To> = crate::FUNCTION_REGISTRY
-            .get_function(crate::IDENTITY_CAST_SPEC)
-            .expect("Identity cast function not found");
+        /// The identity cast function spec - registered once and reused by wbg_cast.
+        /// This is the JS function `(a0) => a0` that passes values through unchanged.
+        /// Type conversion is handled by Rust's encode/decode based on the type parameters.
+        static IDENTITY_CAST_SPEC: JsFunctionSpec =
+            JsFunctionSpec::new(|| alloc::string::String::from("(a0) => a0"));
+
+        inventory::submit! {
+            IDENTITY_CAST_SPEC
+        }
+
+        let func: LazyJsFunction<fn(From) -> To> = IDENTITY_CAST_SPEC.resolve_as();
         func.call(value)
     }
 }
@@ -141,6 +140,71 @@ impl TryFrom<JsValue> for i64 {
     }
 }
 
+impl TryFrom<JsValue> for f64 {
+    type Error = JsValue;
+
+    fn try_from(value: JsValue) -> Result<Self, Self::Error> {
+        value.as_f64().ok_or(value)
+    }
+}
+
+impl TryFrom<&JsValue> for f64 {
+    type Error = JsValue;
+
+    fn try_from(value: &JsValue) -> Result<Self, Self::Error> {
+        value.as_f64().ok_or_else(|| value.clone())
+    }
+}
+
+impl TryFrom<JsValue> for i128 {
+    type Error = JsValue;
+
+    fn try_from(value: JsValue) -> Result<Self, Self::Error> {
+        #[wasm_bindgen(crate = crate, inline_js = "export function BigIntAsI128(val) {
+            if (typeof val !== 'bigint') {
+                throw new Error('Value is not a BigInt');
+            }
+            return Number(val);
+        }")]
+        extern "C" {
+            #[wasm_bindgen(js_name = "BigIntAsI128")]
+            fn big_int_as_i128(val: &JsValue) -> Result<i128, JsValue>;
+        }
+
+        big_int_as_i128(&value)
+    }
+}
+
+impl TryFrom<JsValue> for u128 {
+    type Error = JsValue;
+
+    fn try_from(value: JsValue) -> Result<Self, Self::Error> {
+        #[wasm_bindgen(crate = crate, inline_js = "export function BigIntAsU128(val) {
+            if (typeof val !== 'bigint') {
+                throw new Error('Value is not a BigInt');
+            }
+            if (val < 0n) {
+                throw new Error('Value is negative');
+            }
+            return Number(val);
+        }")]
+        extern "C" {
+            #[wasm_bindgen(js_name = "BigIntAsU128")]
+            fn big_int_as_u128(val: &JsValue) -> Result<u128, JsValue>;
+        }
+
+        big_int_as_u128(&value)
+    }
+}
+
+impl TryFrom<JsValue> for String {
+    type Error = JsValue;
+
+    fn try_from(value: JsValue) -> Result<Self, Self::Error> {
+        value.as_string().ok_or(value)
+    }
+}
+
 to_js_value!(i8);
 from_js_value!(i8);
 to_js_value!(i16);
@@ -149,7 +213,6 @@ to_js_value!(i32);
 from_js_value!(i32);
 to_js_value!(i64);
 to_js_value!(i128);
-from_js_value!(i128);
 to_js_value!(u8);
 from_js_value!(u8);
 to_js_value!(u16);
@@ -158,29 +221,24 @@ to_js_value!(u32);
 from_js_value!(u32);
 to_js_value!(u64);
 to_js_value!(u128);
-from_js_value!(u128);
 to_js_value!(f32);
 from_js_value!(f32);
 to_js_value!(f64);
-from_js_value!(f64);
 to_js_value!(usize);
 from_js_value!(usize);
 to_js_value!(isize);
 from_js_value!(isize);
-// Manual impl for &str since it has a lifetime and wbg_cast requires 'static
 impl From<&str> for JsValue {
     fn from(val: &str) -> Self {
         cast! {(String => JsValue) val.to_string()}
     }
 }
-// Manual impl for &String
 impl From<&String> for JsValue {
     fn from(val: &String) -> Self {
         cast! {(String => JsValue) val.clone()}
     }
 }
 to_js_value!(String);
-from_js_value!(String);
 to_js_value!(());
 from_js_value!(());
 
@@ -267,6 +325,7 @@ impl<T: ?Sized> Closure<T> {
     pub fn once_into_js<F, M>(fn_once: F) -> JsValue
     where
         F: WasmClosureFnOnce<T, M>,
+        T: Sized,
     {
         Closure::once(fn_once).into_js_value()
     }
@@ -274,13 +333,10 @@ impl<T: ?Sized> Closure<T> {
 
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
-use alloc::vec::Vec;
 use core::ops::{Deref, DerefMut};
 // Re-export core types
 pub use cast::JsCast;
-pub use convert::{FromWasmAbi, IntoWasmAbi, RefFromWasmAbi};
 pub use lazy::JsThreadLocal;
-use once_cell::sync::Lazy;
 pub use value::JsValue;
 
 /// A wrapper type around slices and vectors for binding the `Uint8ClampedArray` in JS.
@@ -323,11 +379,9 @@ impl JsError {
         inventory::submit! {
             __SPEC
         }
-        let func: JSFunction<fn(&str) -> JsValue> = FUNCTION_REGISTRY
-            .get_function(__SPEC)
-            .expect("Function not found: Error constructor");
+        static __FUNC: LazyJsFunction<fn(&str) -> JsValue> = __SPEC.resolve_as();
         JsError {
-            value: func.call(message),
+            value: __FUNC.call(message),
         }
     }
 }
@@ -381,16 +435,13 @@ impl JsCast for JsError {
 
 // Re-export commonly used items
 pub use batch::batch;
-pub use encode::{
-    BatchableResult, BinaryDecode, BinaryEncode, EncodeTypeDef, TYPE_CACHED, TYPE_FULL,
-};
+pub use encode::{BatchableResult, BinaryDecode, BinaryEncode, EncodeTypeDef};
 pub use function::JSFunction;
-pub use ipc::{
-    DecodeError, DecodedData, DecodedVariant, EncodedData, IPCMessage, MessageType, decode_data,
-};
-pub use runtime::{WryRuntime, get_runtime, set_event_loop_proxy, wait_for_js_result};
+pub use ipc::{DecodeError, DecodedData, EncodedData};
+pub use runtime::{WryRuntime, run_on_main_thread, start_app};
 
-// Re-export the macro
+// Re-export the macros
+pub use wry_bindgen_macro::link_to;
 pub use wry_bindgen_macro::wasm_bindgen;
 
 // Re-export inventory for macro use
@@ -398,391 +449,11 @@ pub use inventory;
 
 use crate::encode::IntoClosure;
 
-/// Function specification for the registry
-#[derive(Clone, Copy)]
-pub struct JsFunctionSpec {
-    /// Function that generates the JS code
-    pub js_code: fn() -> String,
-}
-
-/// Inline JS module info
-#[derive(Clone, Copy)]
-pub struct InlineJsModule {
-    /// The JS module content
-    pub content: &'static str,
-}
-
-impl InlineJsModule {
-    pub const fn new(content: &'static str) -> Self {
-        Self { content }
-    }
-
-    /// Calculate the hash of the module content for use as a filename
-    /// This uses a simple FNV-1a hash that can also be computed at compile time
-    pub fn hash(&self) -> String {
-        format!("{:x}", self.const_hash())
-    }
-
-    /// Const-compatible hash function (FNV-1a)
-    pub const fn const_hash(&self) -> u64 {
-        const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-        const FNV_PRIME: u64 = 0x100000001b3;
-
-        let mut hash = FNV_OFFSET_BASIS;
-        let mut i = 0;
-        let bytes = self.content.as_bytes();
-        while i < bytes.len() {
-            hash ^= bytes[i] as u64;
-            hash = hash.wrapping_mul(FNV_PRIME);
-            i += 1;
-        }
-        hash
-    }
-}
-
-inventory::collect!(InlineJsModule);
-
-impl JsFunctionSpec {
-    pub const fn new(js_code: fn() -> String) -> Self {
-        Self { js_code }
-    }
-}
-
-inventory::collect!(JsFunctionSpec);
-
-/// Type of class member for exported Rust structs
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum JsClassMemberKind {
-    /// Constructor function (e.g., `Counter.new`)
-    Constructor,
-    /// Instance method on prototype (e.g., `Counter.prototype.increment`)
-    Method,
-    /// Static method on class (e.g., `Counter.staticMethod`)
-    StaticMethod,
-    /// Property getter (e.g., `get count()`)
-    Getter,
-    /// Property setter (e.g., `set count(v)`)
-    Setter,
-}
-
-/// Specification for a member of an exported Rust class
-///
-/// All class members (methods, constructors, getters, setters) are collected
-/// and used to generate complete class code in FunctionRegistry.
-#[derive(Clone, Copy)]
-pub struct JsClassMemberSpec {
-    /// The class name this member belongs to (e.g., "Counter")
-    pub class_name: &'static str,
-    /// The JavaScript member name (e.g., "increment", "count")
-    pub member_name: &'static str,
-    /// The export name for IPC calls (e.g., "Counter::increment")
-    pub export_name: &'static str,
-    /// Number of arguments (excluding self/handle)
-    pub arg_count: usize,
-    /// Type of member
-    pub kind: JsClassMemberKind,
-}
-
-impl JsClassMemberSpec {
-    pub const fn new(
-        class_name: &'static str,
-        member_name: &'static str,
-        export_name: &'static str,
-        arg_count: usize,
-        kind: JsClassMemberKind,
-    ) -> Self {
-        Self {
-            class_name,
-            member_name,
-            export_name,
-            arg_count,
-            kind,
-        }
-    }
-}
-
-inventory::collect!(JsClassMemberSpec);
-
-/// Specification for an exported Rust function/method callable from JavaScript.
-///
-/// This is used by the `#[wasm_bindgen]` macro when exporting structs and impl blocks.
-/// Each export is registered via inventory and collected at runtime.
-#[derive(Clone, Copy)]
-pub struct JsExportSpec {
-    /// The export name (e.g., "MyStruct::new", "MyStruct::method")
-    pub name: &'static str,
-    /// Handler function that decodes arguments, calls the Rust function, and encodes the result
-    pub handler: fn(&mut DecodedData) -> Result<EncodedData, alloc::string::String>,
-}
-
-impl JsExportSpec {
-    pub const fn new(
-        name: &'static str,
-        handler: fn(&mut DecodedData) -> Result<EncodedData, alloc::string::String>,
-    ) -> Self {
-        Self { name, handler }
-    }
-}
-
-inventory::collect!(JsExportSpec);
-
-/// Registry of JS functions collected via inventory
-
-pub struct FunctionRegistry {
-    functions: String,
-    function_specs: Vec<JsFunctionSpec>,
-    /// Map of module path -> module content for inline_js modules
-    modules: alloc::collections::BTreeMap<String, &'static str>,
-}
-
-pub static FUNCTION_REGISTRY: Lazy<FunctionRegistry> =
-    Lazy::new(FunctionRegistry::collect_from_inventory);
-
-/// Generate argument names for JS function (a0, a1, a2, ...)
-fn generate_args(count: usize) -> String {
-    (0..count)
-        .map(|i| format!("a{}", i))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-impl FunctionRegistry {
-    fn collect_from_inventory() -> Self {
-        use core::fmt::Write;
-
-        let mut modules = alloc::collections::BTreeMap::new();
-
-        // Collect all inline JS modules and deduplicate by content hash
-        for inline_js in inventory::iter::<InlineJsModule>() {
-            let hash = inline_js.hash();
-            let module_path = format!("snippets/{}.js", hash);
-            // Only insert if we haven't seen this content before
-            modules.entry(module_path).or_insert(inline_js.content);
-        }
-
-        // Collect all function specs
-        let specs: Vec<_> = inventory::iter::<JsFunctionSpec>().copied().collect();
-
-        // Build the script - load modules from wry:// handler before setting up function registry
-        let mut script = String::new();
-
-        // Wrap everything in an async IIFE to use await
-        script.push_str("(async () => {\n");
-
-        // Track which modules we've already imported (by hash)
-        let mut imported_modules = alloc::collections::BTreeSet::new();
-
-        // Load all inline_js modules from the wry handler (deduplicated by content hash)
-        for inline_js in inventory::iter::<InlineJsModule>() {
-            let hash = inline_js.hash();
-            // Only import each unique module once
-            if imported_modules.insert(hash.clone()) {
-                // Dynamically import the module from wry://snippets/{hash}.js
-                write!(
-                    &mut script,
-                    "  const module_{} = await import('wry://snippets/{}.js');\n",
-                    hash, hash
-                )
-                .unwrap();
-            }
-        }
-
-        // Now set up the function registry after all modules are loaded
-        // Store raw JS functions - type info will be passed at call time
-        script.push_str("  window.setFunctionRegistry([");
-        for (i, spec) in specs.iter().enumerate() {
-            if i > 0 {
-                script.push_str(",\n");
-            }
-            let js_code = (spec.js_code)();
-            write!(&mut script, "{}", js_code).unwrap();
-        }
-        script.push_str("]);\n");
-
-        // Collect all class members and group by class name
-        let mut class_members: alloc::collections::BTreeMap<&str, Vec<&JsClassMemberSpec>> =
-            alloc::collections::BTreeMap::new();
-        for member in inventory::iter::<JsClassMemberSpec>() {
-            class_members
-                .entry(member.class_name)
-                .or_insert_with(Vec::new)
-                .push(member);
-        }
-
-        // Generate complete class definitions for each exported struct
-        for (class_name, members) in &class_members {
-            // Generate class shell
-            writeln!(
-                &mut script,
-                r#"  class {class_name} {{
-    constructor(handle) {{
-      this.__handle = handle;
-      this.__className = "{class_name}";
-      window.__wryExportRegistry.register(this, {{ handle, className: "{class_name}" }});
-    }}
-    static __wrap(handle) {{
-      const obj = Object.create({class_name}.prototype);
-      obj.__handle = handle;
-      obj.__className = "{class_name}";
-      window.__wryExportRegistry.register(obj, {{ handle, className: "{class_name}" }});
-      return obj;
-    }}
-    free() {{
-      const handle = this.__handle;
-      this.__handle = 0;
-      if (handle !== 0) window.__wryCallExport("{class_name}::__drop", handle);
-    }}"#,
-                class_name = class_name
-            )
-            .unwrap();
-
-            // Track getters/setters to combine them into single property descriptors
-            let mut getters: alloc::collections::BTreeMap<&str, &JsClassMemberSpec> =
-                alloc::collections::BTreeMap::new();
-            let mut setters: alloc::collections::BTreeMap<&str, &JsClassMemberSpec> =
-                alloc::collections::BTreeMap::new();
-
-            // Generate methods inside the class body
-            for member in members {
-                match member.kind {
-                    JsClassMemberKind::Method => {
-                        // Instance method
-                        let args = generate_args(member.arg_count);
-                        let args_with_handle = if member.arg_count > 0 {
-                            format!("this.__handle, {}", args)
-                        } else {
-                            "this.__handle".to_string()
-                        };
-                        writeln!(
-                            &mut script,
-                            r#"    {}({}) {{ return window.__wryCallExport("{}", {}); }}"#,
-                            member.member_name, args, member.export_name, args_with_handle
-                        )
-                        .unwrap();
-                    }
-                    JsClassMemberKind::Getter => {
-                        getters.insert(member.member_name, member);
-                    }
-                    JsClassMemberKind::Setter => {
-                        setters.insert(member.member_name, member);
-                    }
-                    _ => {} // Constructor and static handled separately
-                }
-            }
-
-            // Generate getters/setters as property accessors inside the class
-            let mut property_names: alloc::collections::BTreeSet<&str> =
-                alloc::collections::BTreeSet::new();
-            property_names.extend(getters.keys());
-            property_names.extend(setters.keys());
-
-            for prop_name in property_names {
-                let getter = getters.get(prop_name);
-                let setter = setters.get(prop_name);
-                match (getter, setter) {
-                    (Some(g), Some(s)) => {
-                        writeln!(
-                            &mut script,
-                            r#"    get {}() {{ return window.__wryCallExport("{}", this.__handle); }}
-    set {}(v) {{ window.__wryCallExport("{}", this.__handle, v); }}"#,
-                            prop_name, g.export_name, prop_name, s.export_name
-                        )
-                        .unwrap();
-                    }
-                    (Some(g), None) => {
-                        writeln!(
-                            &mut script,
-                            r#"    get {}() {{ return window.__wryCallExport("{}", this.__handle); }}"#,
-                            prop_name, g.export_name
-                        )
-                        .unwrap();
-                    }
-                    (None, Some(s)) => {
-                        writeln!(
-                            &mut script,
-                            r#"    set {}(v) {{ window.__wryCallExport("{}", this.__handle, v); }}"#,
-                            prop_name, s.export_name
-                        )
-                        .unwrap();
-                    }
-                    (None, None) => {}
-                }
-            }
-
-            // Close the class body
-            script.push_str("  }\n");
-
-            // Add static methods and constructors outside the class
-            for member in members {
-                match member.kind {
-                    JsClassMemberKind::Constructor => {
-                        let args = generate_args(member.arg_count);
-                        let args_call = if member.arg_count > 0 { &args } else { "" };
-                        writeln!(
-                            &mut script,
-                            r#"  {class_name}.{method_name} = function({args}) {{ const handle = window.__wryCallExport("{export_name}", {args_call}); return {class_name}.__wrap(handle); }};"#,
-                            class_name = class_name,
-                            method_name = member.member_name,
-                            args = args,
-                            export_name = member.export_name,
-                            args_call = args_call
-                        )
-                        .unwrap();
-                    }
-                    JsClassMemberKind::StaticMethod => {
-                        let args = generate_args(member.arg_count);
-                        let args_call = if member.arg_count > 0 { &args } else { "" };
-                        writeln!(
-                            &mut script,
-                            r#"  {class_name}.{method_name} = function({args}) {{ return window.__wryCallExport("{export_name}", {args_call}); }};"#,
-                            class_name = class_name,
-                            method_name = member.member_name,
-                            args = args,
-                            export_name = member.export_name,
-                            args_call = args_call
-                        )
-                        .unwrap();
-                    }
-                    _ => {} // Methods, getters, setters already handled
-                }
-            }
-
-            // Register class on window
-            writeln!(&mut script, "  window.{} = {};", class_name, class_name).unwrap();
-        }
-
-        // Send a request to wry to notify that the function registry is ready
-        script.push_str("  fetch('wry://ready', { method: 'POST', body: [] });\n");
-
-        // Close the async IIFE
-        script.push_str("})();\n");
-
-        Self {
-            functions: script,
-            function_specs: specs,
-            modules,
-        }
-    }
-
-    /// Get a function by name from the registry
-    pub fn get_function<F>(&self, spec: JsFunctionSpec) -> Option<JSFunction<F>> {
-        let index = self
-            .function_specs
-            .iter()
-            .position(|s| s.js_code as usize == spec.js_code as usize)?;
-        Some(JSFunction::new(index as _))
-    }
-
-    /// Get the initialization script
-    pub fn script(&self) -> &str {
-        &self.functions
-    }
-
-    /// Get the content of an inline_js module by path
-    pub fn get_module(&self, path: &str) -> Option<&'static str> {
-        self.modules.get(path).copied()
-    }
-}
+// Re-export function registry types
+pub use function_registry::{
+    InlineJsModule, JsClassMemberKind, JsClassMemberSpec, JsExportSpec, JsFunctionSpec,
+    LazyJsFunction,
+};
 
 /// Macro to create a thread-local JavaScript value accessor.
 ///
@@ -801,7 +472,7 @@ macro_rules! __wry_bindgen_thread_local {
 
 /// Extension trait for Option to unwrap or throw a JS error.
 /// This is API-compatible with wasm-bindgen's UnwrapThrowExt.
-pub trait UnwrapThrowExt<T> {
+pub trait UnwrapThrowExt<T>: Sized {
     /// Unwrap the value or panic with a message.
     fn unwrap_throw(self) -> T;
 
@@ -819,7 +490,10 @@ impl<T> UnwrapThrowExt<T> for Option<T> {
     }
 }
 
-impl<T, E: core::fmt::Debug> UnwrapThrowExt<T> for Result<T, E> {
+impl<T, E> UnwrapThrowExt<T> for Result<T, E>
+where
+    E: core::fmt::Debug,
+{
     fn unwrap_throw(self) -> T {
         self.expect("called `Result::unwrap_throw()` on an `Err` value")
     }
@@ -831,14 +505,58 @@ impl<T, E: core::fmt::Debug> UnwrapThrowExt<T> for Result<T, E> {
 
 #[cold]
 #[inline(never)]
-pub fn throw_str(message: &str) -> ! {
-    panic!("{}", message);
+pub fn throw_val(s: JsValue) -> ! {
+    panic!("{s:?}");
 }
 
+/// Throw a JS exception with the given message.
+///
+/// # Panics
+/// This function always panics when running outside of WASM.
 #[cold]
 #[inline(never)]
-pub fn throw_val(s: JsValue) -> ! {
-    panic!("{:?}", s);
+pub fn throw_str(s: &str) -> ! {
+    panic!("cannot throw JS exception when running outside of wasm: {s}");
+}
+
+/// Returns the number of live externref objects.
+///
+/// # Panics
+/// This function always panics when running outside of WASM.
+pub fn externref_heap_live_count() -> u32 {
+    panic!("cannot introspect wasm memory when running outside of wasm")
+}
+
+/// Returns a handle to this Wasm instance's `WebAssembly.Module`.
+///
+/// # Panics
+/// This function always panics when running outside of WASM.
+pub fn module() -> JsValue {
+    panic!("cannot introspect wasm memory when running outside of wasm")
+}
+
+/// Returns a handle to this Wasm instance's `WebAssembly.Instance.prototype.exports`.
+///
+/// # Panics
+/// This function always panics when running outside of WASM.
+pub fn exports() -> JsValue {
+    panic!("cannot introspect wasm memory when running outside of wasm")
+}
+
+/// Returns a handle to this Wasm instance's `WebAssembly.Memory`.
+///
+/// # Panics
+/// This function always panics when running outside of WASM.
+pub fn memory() -> JsValue {
+    panic!("cannot introspect wasm memory when running outside of wasm")
+}
+
+/// Returns a handle to this Wasm instance's `WebAssembly.Table` (indirect function table).
+///
+/// # Panics
+/// This function always panics when running outside of WASM.
+pub fn function_table() -> JsValue {
+    panic!("cannot introspect wasm memory when running outside of wasm")
 }
 
 // Re-export extract_rust_handle from js_helpers
@@ -856,7 +574,7 @@ pub mod prelude {
     pub use crate::encode::{BatchableResult, BinaryDecode, BinaryEncode, EncodeTypeDef};
     pub use crate::function::JSFunction;
     pub use crate::lazy::JsThreadLocal;
-    pub use crate::runtime::{AppEvent, set_event_loop_proxy, shutdown, wait_for_js_result};
+    pub use crate::runtime::run_on_main_thread;
     pub use crate::value::JsValue;
     pub use crate::wasm_bindgen;
 }

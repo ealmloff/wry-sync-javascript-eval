@@ -54,11 +54,11 @@ pub trait BatchableResult: BinaryDecode {
 
 /// Marker for cached type definition (type already sent, just reference by ID)
 /// Format: [TYPE_CACHED] [type_id: u32]
-pub const TYPE_CACHED: u8 = 0xFF;
+pub(crate) const TYPE_CACHED: u8 = 0xFF;
 
 /// Marker for full type definition (first time sending this type signature)
 /// Format: [TYPE_FULL] [type_id: u32] [param_count: u8] [param TypeDefs...] [return TypeDef]
-pub const TYPE_FULL: u8 = 0xFE;
+pub(crate) const TYPE_FULL: u8 = 0xFE;
 
 /// Type tags for the binary type definition protocol.
 /// Used to encode type information that JavaScript can parse to create TypeClass instances.
@@ -246,7 +246,7 @@ impl BinaryEncode for u128 {
 
 impl BinaryDecode for u128 {
     fn decode(decoder: &mut DecodedData) -> Result<Self, DecodeError> {
-        Ok(decoder.take_u128()?)
+        decoder.take_u128()
     }
 }
 
@@ -1358,13 +1358,13 @@ impl EncodeTypeDef for Clamped<Vec<u8>> {
     }
 }
 
-impl<'a> EncodeTypeDef for Clamped<&'a [u8]> {
+impl EncodeTypeDef for Clamped<&[u8]> {
     fn encode_type_def(buf: &mut Vec<u8>) {
         buf.push(TypeTag::U8Clamped as u8);
     }
 }
 
-impl<'a> EncodeTypeDef for Clamped<&'a mut [u8]> {
+impl EncodeTypeDef for Clamped<&mut [u8]> {
     fn encode_type_def(buf: &mut Vec<u8>) {
         buf.push(TypeTag::U8Clamped as u8);
     }
@@ -1379,7 +1379,7 @@ impl BinaryEncode for Clamped<Vec<u8>> {
     }
 }
 
-impl<'a> BinaryEncode for Clamped<&'a [u8]> {
+impl BinaryEncode for Clamped<&[u8]> {
     fn encode(self, encoder: &mut EncodedData) {
         encoder.push_u32(self.0.len() as u32);
         for &val in self.0 {
@@ -1388,7 +1388,7 @@ impl<'a> BinaryEncode for Clamped<&'a [u8]> {
     }
 }
 
-impl<'a> BinaryEncode for Clamped<&'a mut [u8]> {
+impl BinaryEncode for Clamped<&mut [u8]> {
     fn encode(self, encoder: &mut EncodedData) {
         encoder.push_u32(self.0.len() as u32);
         for &mut val in self.0 {

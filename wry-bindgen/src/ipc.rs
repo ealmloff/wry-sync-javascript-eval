@@ -46,8 +46,7 @@ impl fmt::Display for DecodeError {
             DecodeError::MessageTooShort { expected, actual } => {
                 write!(
                     f,
-                    "message too short: expected at least {} bytes, got {}",
-                    expected, actual
+                    "message too short: expected at least {expected} bytes, got {actual}"
                 )
             }
             DecodeError::U8BufferEmpty => write!(f, "u8 buffer empty when trying to read"),
@@ -56,15 +55,14 @@ impl fmt::Display for DecodeError {
             DecodeError::StringBufferTooShort { expected, actual } => {
                 write!(
                     f,
-                    "string buffer too short: expected {} bytes, got {}",
-                    expected, actual
+                    "string buffer too short: expected {expected} bytes, got {actual}"
                 )
             }
             DecodeError::InvalidUtf8 { position } => {
-                write!(f, "invalid UTF-8 at position {}", position)
+                write!(f, "invalid UTF-8 at position {position}")
             }
             DecodeError::InvalidMessageType { value } => {
-                write!(f, "invalid message type: {}", value)
+                write!(f, "invalid message type: {value}")
             }
             DecodeError::InvalidHeaderOffsets {
                 u16_offset,
@@ -74,11 +72,10 @@ impl fmt::Display for DecodeError {
             } => {
                 write!(
                     f,
-                    "invalid header offsets: u16={}, u8={}, str={}, total_len={}",
-                    u16_offset, u8_offset, str_offset, total_len
+                    "invalid header offsets: u16={u16_offset}, u8={u8_offset}, str={str_offset}, total_len={total_len}"
                 )
             }
-            DecodeError::Custom(msg) => write!(f, "{}", msg),
+            DecodeError::Custom(msg) => write!(f, "{msg}"),
         }
     }
 }
@@ -94,7 +91,7 @@ impl From<DecodeError> for String {
 /// Message type identifier for IPC protocol.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MessageType {
+pub(crate) enum MessageType {
     /// Rust calling JS (supports batching - multiple operations in one message)
     Evaluate = 0,
     /// JS/Rust responding to a call
@@ -118,7 +115,7 @@ pub enum MessageType {
 /// - For each operation result:
 ///   - encoded return value (varies by function)
 #[derive(Debug)]
-pub struct IPCMessage {
+pub(crate) struct IPCMessage {
     data: Vec<u8>,
 }
 
@@ -174,7 +171,7 @@ impl IPCMessage {
 
 /// Decoded message variant.
 #[derive(Debug)]
-pub enum DecodedVariant<'a> {
+pub(crate) enum DecodedVariant<'a> {
     /// Response from JS/Rust
     Respond { data: DecodedData<'a> },
     /// Evaluation request
@@ -192,7 +189,7 @@ pub struct DecodedData<'a> {
 
 impl<'a> DecodedData<'a> {
     /// Parse decoded data from raw bytes.
-    pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, DecodeError> {
+    pub(crate) fn from_bytes(bytes: &'a [u8]) -> Result<Self, DecodeError> {
         if bytes.len() < 12 {
             return Err(DecodeError::MessageTooShort {
                 expected: 12,
@@ -236,7 +233,7 @@ impl<'a> DecodedData<'a> {
     }
 
     /// Take a u8 from the buffer.
-    pub fn take_u8(&mut self) -> Result<u8, DecodeError> {
+    pub(crate) fn take_u8(&mut self) -> Result<u8, DecodeError> {
         let [first, rest @ ..] = &self.u8_buf else {
             return Err(DecodeError::U8BufferEmpty);
         };
@@ -245,7 +242,7 @@ impl<'a> DecodedData<'a> {
     }
 
     /// Take a u16 from the buffer.
-    pub fn take_u16(&mut self) -> Result<u16, DecodeError> {
+    pub(crate) fn take_u16(&mut self) -> Result<u16, DecodeError> {
         let [first, rest @ ..] = &self.u16_buf else {
             return Err(DecodeError::U16BufferEmpty);
         };
@@ -254,7 +251,7 @@ impl<'a> DecodedData<'a> {
     }
 
     /// Take a u32 from the buffer.
-    pub fn take_u32(&mut self) -> Result<u32, DecodeError> {
+    pub(crate) fn take_u32(&mut self) -> Result<u32, DecodeError> {
         let [first, rest @ ..] = &self.u32_buf else {
             return Err(DecodeError::U32BufferEmpty);
         };
@@ -263,21 +260,21 @@ impl<'a> DecodedData<'a> {
     }
 
     /// Take a u64 from the buffer (stored as two u32s).
-    pub fn take_u64(&mut self) -> Result<u64, DecodeError> {
+    pub(crate) fn take_u64(&mut self) -> Result<u64, DecodeError> {
         let low = self.take_u32()? as u64;
         let high = self.take_u32()? as u64;
         Ok((high << 32) | low)
     }
 
     /// Take a u128 from the buffer
-    pub fn take_u128(&mut self) -> Result<u128, DecodeError> {
+    pub(crate) fn take_u128(&mut self) -> Result<u128, DecodeError> {
         let low = self.take_u64()? as u128;
         let high = self.take_u64()? as u128;
         Ok((high << 64) | low)
     }
 
     /// Take a string from the buffer.
-    pub fn take_str(&mut self) -> Result<&'a str, DecodeError> {
+    pub(crate) fn take_str(&mut self) -> Result<&'a str, DecodeError> {
         let len = self.take_u32()? as usize;
         let actual_len = self.str_buf.len();
         let Some((buf, rem)) = self.str_buf.split_at_checked(len) else {
@@ -294,7 +291,7 @@ impl<'a> DecodedData<'a> {
     }
 
     /// Check if the decoded data is empty.
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.u8_buf.is_empty()
             && self.u16_buf.is_empty()
             && self.u32_buf.is_empty()
@@ -323,7 +320,7 @@ impl EncodedData {
     }
 
     /// Get the total byte length of the encoded data.
-    pub fn byte_len(&self) -> usize {
+    pub(crate) fn byte_len(&self) -> usize {
         12 + self.u32_buf.len() * 4
             + self.u16_buf.len() * 2
             + self.u8_buf.len()
@@ -331,17 +328,17 @@ impl EncodedData {
     }
 
     /// Push a u8 to the buffer.
-    pub fn push_u8(&mut self, value: u8) {
+    pub(crate) fn push_u8(&mut self, value: u8) {
         self.u8_buf.push(value);
     }
 
     /// Push a u16 to the buffer.
-    pub fn push_u16(&mut self, value: u16) {
+    pub(crate) fn push_u16(&mut self, value: u16) {
         self.u16_buf.push(value);
     }
 
     /// Push a u32 to the buffer.
-    pub fn push_u32(&mut self, value: u32) {
+    pub(crate) fn push_u32(&mut self, value: u32) {
         self.u32_buf.push(value);
     }
 
@@ -352,25 +349,25 @@ impl EncodedData {
     }
 
     /// Push a u64 to the buffer (stored as two u32s).
-    pub fn push_u64(&mut self, value: u64) {
+    pub(crate) fn push_u64(&mut self, value: u64) {
         self.push_u32((value & 0xFFFFFFFF) as u32);
         self.push_u32((value >> 32) as u32);
     }
 
     /// Push a u128 to the buffer
-    pub fn push_u128(&mut self, value: u128) {
+    pub(crate) fn push_u128(&mut self, value: u128) {
         self.push_u64((value & 0xFFFFFFFFFFFFFFFF) as u64);
         self.push_u64((value >> 64) as u64);
     }
 
     /// Push a string to the buffer.
-    pub fn push_str(&mut self, value: &str) {
+    pub(crate) fn push_str(&mut self, value: &str) {
         self.push_u32(value.len() as u32);
         self.str_buf.extend_from_slice(value.as_bytes());
     }
 
     /// Convert the encoded data to bytes.
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub(crate) fn to_bytes(&self) -> Vec<u8> {
         let u16_offset = 12 + self.u32_buf.len() * 4;
         let u8_offset = u16_offset + self.u16_buf.len() * 2;
         let str_offset = u8_offset + self.u8_buf.len();
@@ -403,7 +400,7 @@ impl EncodedData {
     }
 
     /// Extend this encoder with data from another encoder.
-    pub fn extend(&mut self, other: &EncodedData) {
+    pub(crate) fn extend(&mut self, other: &EncodedData) {
         self.u8_buf.extend_from_slice(&other.u8_buf);
         self.u16_buf.extend_from_slice(&other.u16_buf);
         self.u32_buf.extend_from_slice(&other.u32_buf);
@@ -412,7 +409,7 @@ impl EncodedData {
 }
 
 /// Decode base64-encoded IPC data.
-pub fn decode_data(bytes: &[u8]) -> Option<IPCMessage> {
+pub(crate) fn decode_data(bytes: &[u8]) -> Option<IPCMessage> {
     let engine = base64::engine::general_purpose::STANDARD;
     let data = engine.decode(bytes).ok()?;
     Some(IPCMessage { data })

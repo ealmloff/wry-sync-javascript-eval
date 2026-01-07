@@ -22,6 +22,10 @@ pollster = "0.4.0"
 futures-channel = "0.3.31"
 futures-util = "0.3.31"
 async-channel = "2.5.0"
+http = "1.4.0"
 
 [build-dependencies]
 lazy-js-bundle = { git = "https://github.com/DioxusLabs/dioxus" }
+
+[lints]
+workspace = true
