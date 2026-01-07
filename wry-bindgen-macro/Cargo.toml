@@ -9,3 +9,6 @@ proc-macro = true
 [dependencies]
 wry-bindgen-macro-support = { path = "../wry-bindgen-macro-support" }
 quote = "1"
+
+[lints]
+workspace = true

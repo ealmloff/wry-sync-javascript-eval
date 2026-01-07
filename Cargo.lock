@@ -6311,6 +6311,7 @@ dependencies = [
  "bytemuck",
  "futures-channel",
  "futures-util",
+ "gtk",
  "inventory",
  "js-sys",
  "lazy-js-bundle 0.7.2 (git+https://github.com/DioxusLabs/dioxus)",
@@ -6325,6 +6326,7 @@ dependencies = [
  "winit",
  "wry",
  "wry-bindgen-macro",
+ "x11-dl",
 ]
 
 [[package]]
