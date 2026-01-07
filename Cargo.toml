@@ -22,6 +22,9 @@ wasm-bindgen-macro = { package = "wry-bindgen-macro", path = "wry-bindgen-macro"
 futures-util = "0.3.31"
 tokio = { version = "1.48.0", features = ["full"] }
 
+[target."cfg(any(target_os = \"linux\", target_os = \"dragonfly\", target_os = \"freebsd\", target_os = \"openbsd\", target_os = \"netbsd\"))".dependencies]
+gtk = { version = "0.18", optional = true }
+
 [build-dependencies]
 lazy-js-bundle = { git = "https://github.com/DioxusLabs/dioxus" }
 
