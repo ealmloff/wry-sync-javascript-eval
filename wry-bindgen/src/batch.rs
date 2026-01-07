@@ -34,6 +34,9 @@ pub struct BatchState {
     borrow_stack_pointer: u64,
     /// Frame stack for nested operations - saves borrow stack pointers
     borrow_frame_stack: Vec<u64>,
+    /// Count of IDs reserved as placeholders during the current batch.
+    /// This is sent to JS so it can skip these IDs during nested callback allocations.
+    reserved_placeholder_count: u32,
 }
 
 impl BatchState {
@@ -49,6 +52,8 @@ impl BatchState {
             borrow_stack_pointer: JSIDX_OFFSET,
             // Frame stack starts empty
             borrow_frame_stack: Vec::new(),
+            // No reserved placeholders initially
+            reserved_placeholder_count: 0,
         }
     }
 
@@ -63,6 +68,17 @@ impl BatchState {
     pub fn get_next_heap_id(&mut self) -> u64 {
         let id = self.max_id;
         self.max_id += 1;
+        id
+    }
+
+    /// Get the next heap ID for a batched return value placeholder.
+    /// This also tracks the reserved placeholder count so JS can skip these IDs
+    /// during nested callback allocations.
+    pub fn get_next_placeholder_id(&mut self) -> u64 {
+        let id = self.get_next_heap_id();
+        if self.is_batching {
+            self.reserved_placeholder_count += 1;
+        }
         id
     }
 
@@ -119,8 +135,12 @@ impl BatchState {
 
     /// Take the message data and reset the batch for reuse.
     /// Includes any pending drops at the start of the message.
+    /// Prepends the reserved placeholder count so JS can skip those IDs during nested allocations.
     pub(crate) fn take_message(&mut self) -> IPCMessage {
-        IPCMessage::new(self.take_encoder().to_bytes())
+        let reserved_count = self.take_reserved_placeholder_count();
+        let mut encoder = self.take_encoder();
+        encoder.prepend_u32(reserved_count);
+        IPCMessage::new(encoder.to_bytes())
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -150,6 +170,12 @@ impl BatchState {
 
     pub(crate) fn is_batching(&self) -> bool {
         self.is_batching
+    }
+
+    /// Take and reset the reserved placeholder count.
+    /// Called when building a message to send to JS.
+    pub(crate) fn take_reserved_placeholder_count(&mut self) -> u32 {
+        core::mem::take(&mut self.reserved_placeholder_count)
     }
 
     pub(crate) fn take_encoder(&mut self) -> EncodedData {

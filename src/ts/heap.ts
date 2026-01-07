@@ -15,6 +15,8 @@ class JSHeap {
   private borrowStackPointer: number;
   // Frame stack for nested operations - saves borrow stack pointers
   private borrowFrameStack: number[];
+  // Stack of reservation scopes: each scope tracks reserved IDs for batch mode
+  private reservationStack: { start: number; count: number; nextIndex: number }[];
 
   constructor() {
     // Pre-allocate slots array - slots 0-127 are for borrow stack (1-127 usable),
@@ -34,13 +36,48 @@ class JSHeap {
     this.borrowStackPointer = JSIDX_OFFSET;
     // Frame stack starts empty
     this.borrowFrameStack = [];
+    // Reservation stack starts empty
+    this.reservationStack = [];
   }
 
   insert(value: unknown): number {
-    let id = this.maxId;
+    const id = this.maxId;
     this.maxId++;
     this.slots[id] = value;
     return id;
+  }
+
+  // Push a reservation scope for `count` IDs starting at current maxId
+  pushReservationScope(count: number): void {
+    const start = this.maxId;
+    this.reservationStack.push({ start, count, nextIndex: 0 });
+    // Advance maxId past all reserved IDs
+    this.maxId += count;
+  }
+
+  popReservationScope(): void {
+    this.reservationStack.pop();
+  }
+
+  // Check if an ID is reserved in any scope
+  private isReserved(id: number): boolean {
+    for (const scope of this.reservationStack) {
+      if (id >= scope.start && id < scope.start + scope.count) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Fill the next reserved slot in the current scope
+  fillNextReserved(value: unknown): void {
+    const scope = this.reservationStack[this.reservationStack.length - 1];
+    if (!scope || scope.nextIndex >= scope.count) {
+      throw new Error("No reserved slots available");
+    }
+    const id = scope.start + scope.nextIndex;
+    scope.nextIndex++;
+    this.slots[id] = value;
   }
 
   get(id: number): unknown | undefined {
