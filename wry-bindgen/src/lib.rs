@@ -251,7 +251,7 @@ pub struct Closure<T: ?Sized> {
     pub(crate) value: JsValue,
 }
 
-impl<T> Closure<T> {
+impl<T: ?Sized> Closure<T> {
     pub fn new<M, F: IntoClosure<M, Self>>(f: F) -> Self {
         f.into_closure()
     }
@@ -286,8 +286,7 @@ impl<T: ?Sized> AsRef<JsValue> for Closure<T> {
     }
 }
 
-impl<T> core::fmt::Debug for Closure<T>
-{
+impl<T: ?Sized> core::fmt::Debug for Closure<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Closure")
             .field("value", &self.value)
@@ -327,7 +326,7 @@ impl<T: ?Sized> Closure<T> {
     pub fn once_into_js<F, M>(fn_once: F) -> JsValue
     where
         F: WasmClosureFnOnce<T, M>,
-        T: Sized
+        T: Sized,
     {
         Closure::once(fn_once).into_js_value()
     }

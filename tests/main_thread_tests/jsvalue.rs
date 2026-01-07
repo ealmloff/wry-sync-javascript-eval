@@ -571,7 +571,10 @@ pub(crate) fn test_partial_eq_strings() {
     // Test &str
     assert!(js_hello == "hello", "JsValue should equal &str");
     assert!("hello" == js_hello, "&str should equal JsValue");
-    assert!(js_hello != "world", "JsValue should not equal different &str");
+    assert!(
+        js_hello != "world",
+        "JsValue should not equal different &str"
+    );
 
     // Test String
     let hello_string = String::from("hello");
@@ -584,7 +587,10 @@ pub(crate) fn test_partial_eq_strings() {
 
     // Test with non-string
     let js_num = JsValue::from_f64(42.0);
-    assert!(js_num != "42", "number JsValue should not equal string '42'");
+    assert!(
+        js_num != "42",
+        "number JsValue should not equal string '42'"
+    );
 }
 
 pub(crate) fn test_try_from_f64() {
@@ -601,13 +607,19 @@ pub(crate) fn test_try_from_f64() {
     // Successful conversion
     let js_num = get_number(42.5);
     let result: Result<f64, _> = js_num.try_into();
-    assert!(result.is_ok(), "TryFrom<JsValue> for f64 should succeed for number");
+    assert!(
+        result.is_ok(),
+        "TryFrom<JsValue> for f64 should succeed for number"
+    );
     assert_eq!(result.unwrap(), 42.5);
 
     // Failed conversion (string is not a number)
     let js_str = get_string("not a number");
     let result: Result<f64, _> = js_str.try_into();
-    assert!(result.is_err(), "TryFrom<JsValue> for f64 should fail for string");
+    assert!(
+        result.is_err(),
+        "TryFrom<JsValue> for f64 should fail for string"
+    );
 
     // Test TryFrom<&JsValue> for f64
     let js_num2 = get_number(100.0);
@@ -630,13 +642,19 @@ pub(crate) fn test_try_from_string() {
     // Successful conversion
     let js_str = get_string("hello world");
     let result: Result<String, _> = js_str.try_into();
-    assert!(result.is_ok(), "TryFrom<JsValue> for String should succeed for string");
+    assert!(
+        result.is_ok(),
+        "TryFrom<JsValue> for String should succeed for string"
+    );
     assert_eq!(result.unwrap(), "hello world");
 
     // Failed conversion (number is not a string)
     let js_num = get_number(42.0);
     let result: Result<String, _> = js_num.try_into();
-    assert!(result.is_err(), "TryFrom<JsValue> for String should fail for number");
+    assert!(
+        result.is_err(),
+        "TryFrom<JsValue> for String should fail for number"
+    );
 }
 
 pub(crate) fn test_owned_arithmetic_operators() {
@@ -752,12 +770,20 @@ pub(crate) fn test_jscast_as_ref() {
     let js_ref: &JsValue = arr.as_ref();
 
     // Verify it's the same array by checking length
-    assert_eq!(get_length(js_ref), 3, "JsCast::as_ref should return correct &JsValue");
+    assert_eq!(
+        get_length(js_ref),
+        3,
+        "JsCast::as_ref should return correct &JsValue"
+    );
 }
 
 pub(crate) fn test_as_ref_jsvalue() {
     // Test AsRef<JsValue> for JsValue
     let val = JsValue::from_f64(42.0);
     let val_ref: &JsValue = val.as_ref();
-    assert_eq!(val_ref.as_f64(), Some(42.0), "AsRef<JsValue> should return self");
+    assert_eq!(
+        val_ref.as_f64(),
+        Some(42.0),
+        "AsRef<JsValue> should return self"
+    );
 }
