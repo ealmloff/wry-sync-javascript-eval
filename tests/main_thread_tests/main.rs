@@ -8,6 +8,7 @@ mod callbacks;
 mod catch_attribute;
 mod clamped;
 mod indexing;
+mod is_type_of;
 mod jsvalue;
 mod module_import;
 mod reentrant_callbacks;
@@ -105,6 +106,8 @@ fn main() {
         test_with_js_context(string_enum::test_string_enum_to_str).await;
         test_with_js_context(string_enum::test_string_enum_to_jsvalue).await;
         test_with_js_context(string_enum::test_string_enum_from_jsvalue).await;
+        test_with_js_context(string_enum::test_string_enum_pass_to_js).await;
+        test_with_js_context(string_enum::test_string_enum_receive_from_js).await;
 
         // Catch attribute tests
         test_with_js_context(catch_attribute::test_catch_throws_error).await;
@@ -140,6 +143,13 @@ fn main() {
         test_with_js_context(indexing::test_indexing_getter_array).await;
         test_with_js_context(indexing::test_indexing_setter_array).await;
         test_with_js_context(indexing::test_indexing_deleter_array).await;
+
+        // is_type_of tests
+        test_with_js_context(is_type_of::test_is_type_of_string).await;
+        test_with_js_context(is_type_of::test_is_type_of_number).await;
+        test_with_js_context(is_type_of::test_is_type_of_with_dyn_into).await;
+        test_with_js_context(is_type_of::test_is_type_of_with_dyn_ref).await;
+        test_with_js_context(is_type_of::test_has_type_with_is_type_of).await;
 
         // async bindings test
         async_test_with_js_context(async_bindings::test_call_async).await;

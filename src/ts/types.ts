@@ -30,6 +30,7 @@ enum TypeTag {
   Array = 21,
   BorrowedRef = 22,
   U8Clamped = 23,
+  StringEnum = 24,
 }
 
 /**
@@ -471,6 +472,29 @@ function parseTypeDef(bytes: Uint8Array, offset: { value: number }): TypeClass {
     }
     case TypeTag.U8Clamped:
       return u8ClampedTypeInstance;
+    case TypeTag.StringEnum: {
+      // Read variant count
+      const variantCount = bytes[offset.value++];
+      const lookupArray: string[] = [];
+
+      // Read each variant string
+      for (let i = 0; i < variantCount; i++) {
+        // Read string length (u32 little-endian)
+        const len =
+          bytes[offset.value] |
+          (bytes[offset.value + 1] << 8) |
+          (bytes[offset.value + 2] << 16) |
+          (bytes[offset.value + 3] << 24);
+        offset.value += 4;
+
+        // Read string bytes and decode as UTF-8
+        const strBytes = bytes.subarray(offset.value, offset.value + len);
+        offset.value += len;
+        lookupArray.push(new TextDecoder().decode(strBytes));
+      }
+
+      return new StringEnumType(lookupArray);
+    }
     default:
       throw new Error(`Unknown TypeTag: ${tag}`);
   }
