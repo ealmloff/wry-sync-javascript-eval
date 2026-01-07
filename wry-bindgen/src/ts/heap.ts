@@ -59,16 +59,6 @@ class JSHeap {
     this.reservationStack.pop();
   }
 
-  // Check if an ID is reserved in any scope
-  private isReserved(id: number): boolean {
-    for (const scope of this.reservationStack) {
-      if (id >= scope.start && id < scope.start + scope.count) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   // Fill the next reserved slot in the current scope
   fillNextReserved(value: unknown): void {
     const scope = this.reservationStack[this.reservationStack.length - 1];
