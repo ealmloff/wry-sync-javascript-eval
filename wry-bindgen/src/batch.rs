@@ -6,8 +6,8 @@
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
-use crate::DecodedData;
 use crate::encode::{BatchableResult, BinaryDecode};
+use crate::ipc::DecodedData;
 use crate::ipc::{EncodedData, IPCMessage, MessageType};
 use crate::runtime::get_runtime;
 use crate::value::{JSIDX_OFFSET, JSIDX_RESERVED};
@@ -267,15 +267,14 @@ pub(crate) fn flush_and_return<R: BinaryDecode>() -> R {
 
 pub(crate) fn flush_and_then<R>(then: impl for<'a> Fn(DecodedData<'a>) -> R) -> R {
     use crate::runtime::AppEvent;
-    use pollster::FutureExt;
 
     let batch_msg = BATCH_STATE.with(|state| state.borrow_mut().take_message());
 
     // Send and wait for result
     let runtime = get_runtime();
-    (runtime.proxy)(AppEvent::Ipc(batch_msg));
+    (runtime.proxy)(AppEvent::ipc(batch_msg));
     loop {
-        if let Some(result) = crate::runtime::progress_js_with(&then).block_on() {
+        if let Some(result) = crate::runtime::progress_js_with(&then) {
             return result;
         }
     }

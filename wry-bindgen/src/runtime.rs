@@ -3,13 +3,11 @@
 //! This module handles the connection between the Rust runtime and the
 //! JavaScript environment via winit's event loop.
 
-use core::cell::RefCell;
+use core::error::Error;
+use core::fmt::Display;
 use core::pin::Pin;
-use std::rc::Rc;
-use std::sync::OnceLock;
 
 use alloc::boxed::Box;
-use alloc::vec::Vec;
 use async_channel::{Receiver, Sender};
 use futures_util::{FutureExt, StreamExt};
 use once_cell::sync::OnceCell;
@@ -17,19 +15,52 @@ use spin::RwLock;
 
 use slotmap::{DefaultKey, KeyData};
 
-use crate::MessageType;
-use crate::encode::BinaryDecode;
 use crate::function::{
     CALL_EXPORT_FN_ID, DROP_NATIVE_REF_FN_ID, RustCallback, THREAD_LOCAL_OBJECT_ENCODER,
 };
+use crate::ipc::MessageType;
 use crate::ipc::{DecodedData, DecodedVariant, IPCMessage};
+use crate::wry::WryBindgen;
 
 /// Application-level events that can be sent through the event loop.
 ///
 /// This enum wraps both IPC messages from JavaScript and control messages
 /// from the application (like shutdown requests).
 #[derive(Debug)]
-pub enum AppEvent {
+pub struct AppEvent {
+    event: AppEventVariant,
+}
+
+impl AppEvent {
+    /// Create a new IPC event.
+    pub(crate) fn ipc(msg: IPCMessage) -> Self {
+        Self {
+            event: AppEventVariant::Ipc(msg),
+        }
+    }
+
+    /// Create a new webview loaded event.
+    pub(crate) fn webview_loaded() -> Self {
+        Self {
+            event: AppEventVariant::WebviewLoaded,
+        }
+    }
+
+    /// Create a new shutdown event with the given status code.
+    pub(crate) fn shutdown(status: i32) -> Self {
+        Self {
+            event: AppEventVariant::Shutdown(status),
+        }
+    }
+
+    /// Consume the event and return the inner variant.
+    pub(crate) fn into_variant(self) -> AppEventVariant {
+        self.event
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum AppEventVariant {
     /// An IPC message from JavaScript
     Ipc(IPCMessage),
     /// The webview has finished loading
@@ -44,7 +75,7 @@ pub struct IPCSenders {
 }
 
 impl IPCSenders {
-    pub fn start_send(&self, msg: IPCMessage) {
+    pub(crate) fn start_send(&self, msg: IPCMessage) {
         match msg.ty().unwrap() {
             MessageType::Evaluate => {
                 self.eval_sender
@@ -66,21 +97,23 @@ struct IPCReceivers {
 }
 
 impl IPCReceivers {
-    pub async fn recv(&mut self) -> IPCMessage {
-        let Self {
-            eval_receiver,
-            respond_receiver,
-        } = self;
-        futures_util::select_biased! {
-            // We need to always poll the respond receiver first. If the response is ready, quit immediately
-            // before running any more callbacks
-            respond_msg = respond_receiver.next().fuse() => {
-                respond_msg.expect("Failed to receive respond message")
-            },
-            eval_msg = eval_receiver.next().fuse() => {
-                eval_msg.expect("Failed to receive evaluate message")
-            },
-        }
+    pub fn recv_blocking(&mut self) -> IPCMessage {
+        pollster::block_on(async {
+            let Self {
+                eval_receiver,
+                respond_receiver,
+            } = self;
+            futures_util::select_biased! {
+                // We need to always poll the respond receiver first. If the response is ready, quit immediately
+                // before running any more callbacks
+                respond_msg = respond_receiver.next().fuse() => {
+                    respond_msg.expect("Failed to receive respond message")
+                },
+                eval_msg = eval_receiver.next().fuse() => {
+                    eval_msg.expect("Failed to receive evaluate message")
+                },
+            }
+        })
     }
 }
 
@@ -90,125 +123,127 @@ impl IPCReceivers {
 /// WebView and manages queued Rust calls.
 pub struct WryRuntime {
     pub proxy: Box<dyn Fn(AppEvent) + Send + Sync>,
-    pub(crate) queued_rust_calls: RwLock<Vec<IPCMessage>>,
-    pub(crate) senders: OnceLock<IPCSenders>,
+    pub(crate) senders: IPCSenders,
+    receivers: RwLock<IPCReceivers>,
 }
 
 impl WryRuntime {
     /// Create a new runtime with the given event loop proxy.
-    pub fn new(proxy: Box<dyn Fn(AppEvent) + Send + Sync>) -> Self {
-        Self {
-            proxy,
-            queued_rust_calls: RwLock::new(Vec::new()),
-            senders: OnceLock::new(),
-        }
-    }
-
-    /// Send a response back to JavaScript.
-    pub fn js_response(&self, responder: IPCMessage) {
-        (self.proxy)(AppEvent::Ipc(responder));
-    }
-
-    /// Request the application to shut down with a status code.
-    pub fn shutdown(&self, status: i32) {
-        (self.proxy)(AppEvent::Shutdown(status));
-    }
-
-    /// Queue a Rust call from JavaScript.
-    pub fn queue_rust_call(&self, responder: IPCMessage) {
-        if let Some(senders) = self.senders.get() {
-            senders.start_send(responder);
-        } else {
-            self.queued_rust_calls.write().push(responder);
-        }
-    }
-
-    /// Set the sender for Rust calls and flush any queued calls.
-    pub fn set_sender(&self, senders: IPCSenders) {
-        self.senders
-            .set(senders)
-            .unwrap_or_else(|_| panic!("Sender already set"));
-        let mut queued = self.queued_rust_calls.write();
-        let senders = self.senders.get().expect("Senders not set");
-        for call in queued.drain(..) {
-            senders.start_send(call);
-        }
-    }
-}
-
-static RUNTIME: OnceCell<WryRuntime> = OnceCell::new();
-
-/// Set the event loop proxy for the runtime.
-///
-/// This must be called once before any JS operations are performed.
-pub fn set_event_loop_proxy(proxy: Box<dyn Fn(AppEvent) + Send + Sync>) {
-    RUNTIME
-        .set(WryRuntime::new(proxy))
-        .unwrap_or_else(|_| panic!("Event loop proxy already set"));
-}
-
-/// Request the application to shut down with a status code.
-///
-/// This sends a shutdown event through the event loop, which will cause
-/// the webview to close and the application to exit with the given status code.
-pub fn shutdown(status: i32) {
-    get_runtime().shutdown(status);
-}
-
-/// Get the runtime environment.
-///
-/// Panics if the runtime has not been initialized.
-pub fn get_runtime() -> &'static WryRuntime {
-    RUNTIME.get().expect("Event loop proxy not set")
-}
-
-thread_local! {
-    static THREAD_LOCAL_RECEIVER: Rc<RefCell<IPCReceivers>> = Rc::new(RefCell::new({
-        let runtime = get_runtime();
+    pub(crate) fn new(proxy: Box<dyn Fn(AppEvent) + Send + Sync>) -> Self {
         let (eval_sender, eval_receiver) = async_channel::unbounded();
         let (respond_sender, respond_receiver) = futures_channel::mpsc::unbounded();
         let senders = IPCSenders {
             eval_sender,
             respond_sender,
         };
-        runtime.set_sender(senders);
-        IPCReceivers {
+        let receivers = RwLock::new(IPCReceivers {
             eval_receiver: Box::pin(eval_receiver),
             respond_receiver,
+        });
+        Self {
+            proxy,
+            senders,
+            receivers,
         }
-    }));
-}
+    }
 
-/// Wait for a JS response, handling any Rust callbacks that occur during the wait.
-pub async fn wait_for_js_result<R: BinaryDecode>() -> R {
-    loop {
-        if let Some(result) = wait_for_js_event::<R>().await {
-            return result;
-        }
+    /// Send a response back to JavaScript.
+    pub(crate) fn js_response(&self, responder: IPCMessage) {
+        (self.proxy)(AppEvent::ipc(responder));
+    }
+
+    /// Request the application to shut down with a status code.
+    pub fn shutdown(&self, status: i32) {
+        (self.proxy)(AppEvent::shutdown(status));
+    }
+
+    /// Queue a Rust call from JavaScript.
+    pub(crate) fn queue_rust_call(&self, responder: IPCMessage) {
+        self.senders.start_send(responder);
     }
 }
 
-pub async fn wait_for_js_event<R: BinaryDecode>() -> Option<R> {
-    progress_js_with(|mut data| {
-        let response = R::decode(&mut data).expect("Failed to decode return value");
-        assert!(
-            data.is_empty(),
-            "Extra data remaining after decoding response"
-        );
-        response
-    })
-    .await
+static RUNTIME: OnceCell<WryRuntime> = OnceCell::new();
+
+/// Error indicating that the runtime has already been started.
+#[derive(Debug)]
+pub struct AlreadyStartedError;
+
+impl Display for AlreadyStartedError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "The runtime has already been started")
+    }
 }
 
-#[allow(clippy::await_holding_refcell_ref)]
-pub async fn progress_js_with<O>(with_respond: impl for<'a> Fn(DecodedData<'a>) -> O) -> Option<O> {
+impl Error for AlreadyStartedError {}
+
+/// Start the application thread with the given event loop proxy
+pub fn start_app<F>(
+    event_loop_proxy: impl Fn(AppEvent) + Send + Sync + 'static,
+    app: impl FnOnce() -> F + Send + 'static,
+    start_async_runtime: impl FnOnce(Pin<Box<dyn Future<Output = ()>>>) + Send + 'static,
+) -> Result<WryBindgen, AlreadyStartedError>
+where
+    F: core::future::Future<Output = ()> + 'static,
+{
+    let event_loop_proxy = Box::new(event_loop_proxy) as Box<dyn Fn(AppEvent) + Send + Sync>;
+    if RUNTIME.set(WryRuntime::new(event_loop_proxy)).is_err() {
+        eprintln!("start_app can only be called once per process. Exiting.");
+        return Err(AlreadyStartedError);
+    }
+    // Spawn the app thread with panic handling - if the app panics, shut down the webview
+    std::thread::spawn(move || {
+        let run = || {
+            let run_app = app();
+            let wait_for_events = poll_callbacks();
+
+            start_async_runtime(Box::pin(async move {
+                futures_util::select! {
+                    _ = run_app.fuse() => {},
+                    _ = wait_for_events.fuse() => {},
+                }
+            }));
+        };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run));
+        let status = if let Err(panic_info) = result {
+            eprintln!("App thread panicked, shutting down webview");
+            // Try to print panic info
+            if let Some(s) = panic_info.downcast_ref::<&str>() {
+                eprintln!("Panic message: {s}");
+            } else if let Some(s) = panic_info.downcast_ref::<alloc::string::String>() {
+                eprintln!("Panic message: {s}");
+            }
+            1 // Exit with error status on panic
+        } else {
+            0 // Exit with success status on normal completion
+        };
+        shutdown(status);
+    });
+
+    Ok(WryBindgen::new())
+}
+
+/// Request the application to shut down with a status code.
+///
+/// This sends a shutdown event through the event loop, which will cause
+/// the webview to close and the application to exit with the given status code.
+pub(crate) fn shutdown(status: i32) {
+    get_runtime().shutdown(status);
+}
+
+/// Get the runtime environment.
+///
+/// Panics if the runtime has not been initialized.
+pub(crate) fn get_runtime() -> &'static WryRuntime {
+    RUNTIME.get().expect("Event loop proxy not set")
+}
+
+pub(crate) fn progress_js_with<O>(
+    with_respond: impl for<'a> Fn(DecodedData<'a>) -> O,
+) -> Option<O> {
     let runtime = get_runtime();
 
-    let response = THREAD_LOCAL_RECEIVER
-        .with(|receiver| receiver.clone())
-        .borrow_mut()
-        .recv()
-        .await;
+    let response = get_runtime().receivers.write().recv_blocking();
 
     let decoder = response.decoded().expect("Failed to decode response");
     match decoder {
@@ -222,7 +257,7 @@ pub async fn progress_js_with<O>(with_respond: impl for<'a> Fn(DecodedData<'a>) 
 
 pub async fn poll_callbacks() {
     let runtime = get_runtime();
-    let receiver = THREAD_LOCAL_RECEIVER.with(|receiver| receiver.borrow().eval_receiver.clone());
+    let receiver = get_runtime().receivers.read().eval_receiver.clone();
 
     while let Ok(response) = receiver.recv().await {
         let decoder = response.decoded().expect("Failed to decode response");

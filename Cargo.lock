@@ -5445,6 +5445,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-util",
+ "http 1.4.0",
  "inventory",
  "lazy-js-bundle 0.7.2 (git+https://github.com/DioxusLabs/dioxus)",
  "once_cell",

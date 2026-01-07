@@ -7,11 +7,9 @@ use winit::{
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::{Rect, WebViewBuilder};
 
-use wasm_bindgen::runtime::AppEvent;
+use wasm_bindgen::{runtime::AppEvent, wry::WryBindgen};
 
-use crate::FunctionRegistry;
 use crate::home::root_response;
-use crate::wry_bindgen::WryBindgen;
 
 pub(crate) struct State {
     wry_bindgen: WryBindgen,
@@ -22,13 +20,9 @@ pub(crate) struct State {
 }
 
 impl State {
-    pub fn new(
-        function_registry: &'static FunctionRegistry,
-        proxy: EventLoopProxy<AppEvent>,
-        headless: bool,
-    ) -> Self {
+    pub fn new(wry_bindgen: WryBindgen, proxy: EventLoopProxy<AppEvent>, headless: bool) -> Self {
         Self {
-            wry_bindgen: WryBindgen::new(function_registry),
+            wry_bindgen,
             window: None,
             webview: None,
             proxy,
@@ -45,25 +39,25 @@ impl ApplicationHandler<AppEvent> for State {
         let window = event_loop.create_window(attributes).unwrap();
 
         let proxy = self.proxy.clone();
-        let protocol_handler = self.wry_bindgen.create_protocol_handler(
-            move |event| {
-                proxy.send_event(event).unwrap();
-            },
-            root_response,
-        );
+        let protocol_handler = self.wry_bindgen.create_protocol_handler(move |event| {
+            proxy.send_event(event).unwrap();
+        });
 
         let webview = WebViewBuilder::new()
             .with_devtools(true)
             .with_asynchronous_custom_protocol("wry".into(), move |_, request, responder| {
-                protocol_handler(&request, responder);
+                let responder = |response| responder.respond(response);
+                let Some(responder) = protocol_handler(&request, responder) else {
+                    return;
+                };
+
+                responder(root_response())
             })
             .with_url("wry://index")
             .build_as_child(&window)
             .unwrap();
 
         webview.open_devtools();
-        let script = self.wry_bindgen.init_script();
-        webview.evaluate_script(script).unwrap();
 
         self.window = Some(window);
         self.webview = Some(webview);
@@ -97,7 +91,11 @@ impl ApplicationHandler<AppEvent> for State {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         if let Some(webview) = &self.webview
-            && let Some(status) = self.wry_bindgen.handle_user_event(event, webview)
+            && let Some(status) = self.wry_bindgen.handle_user_event(event, |script| {
+                if let Err(err) = webview.evaluate_script(script) {
+                    eprintln!("Error evaluating script: {err}");
+                }
+            })
         {
             event_loop.exit();
             std::process::exit(status);
