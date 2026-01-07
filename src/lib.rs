@@ -3,11 +3,9 @@
 //! This library provides the infrastructure for launching a webview with
 //! Rust-JavaScript bindings via the wry-bindgen macro system.
 
-use futures_util::FutureExt;
-use wasm_bindgen::runtime::poll_callbacks;
 use winit::event_loop::EventLoop;
 
-use wasm_bindgen::Closure;
+use wasm_bindgen::{Closure, start_app};
 
 pub mod bindings;
 mod home;
@@ -20,7 +18,7 @@ pub use bindings::set_on_log;
 
 // Re-export prelude items that apps need
 pub use wasm_bindgen::JsValue;
-pub use wasm_bindgen::prelude::{AppEvent, batch, set_event_loop_proxy, shutdown};
+pub use wasm_bindgen::prelude::batch;
 
 use crate::bindings::set_on_error;
 
@@ -121,46 +119,22 @@ where
 
     let event_loop = EventLoop::with_user_event().build().unwrap();
     let proxy = event_loop.create_proxy();
-    set_event_loop_proxy({
+
+    let event_loop_proxy = {
         let proxy = proxy.clone();
-        Box::new(move |event| {
-            proxy.send_event(event).unwrap();
-        })
-    });
-    let wry_bindgen = wasm_bindgen::wry::WryBindgen::new();
+        move |event| {
+            _ = proxy.send_event(event);
+        }
+    };
 
-    // Spawn the app thread with panic handling - if the app panics, shut down the webview
-    std::thread::spawn(move || {
-        let run = || {
-            let run_app = app();
-            let wait_for_events = poll_callbacks();
-
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap()
-                .block_on(async move {
-                    futures_util::select! {
-                        _ = run_app.fuse() => {},
-                        _ = wait_for_events.fuse() => {},
-                    }
-                });
-        };
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run));
-        let status = if let Err(panic_info) = result {
-            eprintln!("App thread panicked, shutting down webview");
-            // Try to print panic info
-            if let Some(s) = panic_info.downcast_ref::<&str>() {
-                eprintln!("Panic message: {s}");
-            } else if let Some(s) = panic_info.downcast_ref::<String>() {
-                eprintln!("Panic message: {s}");
-            }
-            1 // Exit with error status on panic
-        } else {
-            0 // Exit with success status on normal completion
-        };
-        shutdown(status);
-    });
+    let wry_bindgen = start_app(event_loop_proxy, app, |future| {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(future);
+    })
+    .unwrap();
 
     let mut state = State::new(wry_bindgen, proxy, headless);
     event_loop.run_app(&mut state).unwrap();

@@ -453,7 +453,7 @@ pub use function::JSFunction;
 pub use ipc::{
     DecodeError, DecodedData, DecodedVariant, EncodedData, IPCMessage, MessageType, decode_data,
 };
-pub use runtime::{WryRuntime, get_runtime, set_event_loop_proxy};
+pub use runtime::{WryRuntime, start_app};
 
 // Re-export the macros
 pub use wry_bindgen_macro::link_to;
@@ -966,7 +966,6 @@ pub mod prelude {
     pub use crate::encode::{BatchableResult, BinaryDecode, BinaryEncode, EncodeTypeDef};
     pub use crate::function::JSFunction;
     pub use crate::lazy::JsThreadLocal;
-    pub use crate::runtime::{AppEvent, set_event_loop_proxy, shutdown};
     pub use crate::value::JsValue;
     pub use crate::wasm_bindgen;
 }

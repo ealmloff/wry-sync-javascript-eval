@@ -18,6 +18,7 @@ use crate::function::{
     CALL_EXPORT_FN_ID, DROP_NATIVE_REF_FN_ID, RustCallback, THREAD_LOCAL_OBJECT_ENCODER,
 };
 use crate::ipc::{DecodedData, DecodedVariant, IPCMessage};
+use crate::wry::WryBindgen;
 
 /// Application-level events that can be sent through the event loop.
 ///
@@ -129,27 +130,63 @@ impl WryRuntime {
 
 static RUNTIME: OnceCell<WryRuntime> = OnceCell::new();
 
-/// Set the event loop proxy for the runtime.
-///
-/// This must be called once before any JS operations are performed.
-pub fn set_event_loop_proxy(proxy: Box<dyn Fn(AppEvent) + Send + Sync>) {
-    RUNTIME
-        .set(WryRuntime::new(proxy))
-        .unwrap_or_else(|_| panic!("Event loop proxy already set"));
+/// Start the application thread with the given event loop proxy
+pub fn start_app<F>(
+    event_loop_proxy: impl Fn(AppEvent) + Send + Sync + 'static,
+    app: impl FnOnce() -> F + Send + 'static,
+    start_async_runtime: impl FnOnce(Pin<Box<dyn Future<Output = ()>>>) + Send + 'static,
+) -> Result<WryBindgen, ()> where
+    F: core::future::Future<Output = ()> + 'static,
+{
+    let event_loop_proxy = Box::new(event_loop_proxy) as Box<dyn Fn(AppEvent) + Send + Sync>;
+    if let Err(_) = RUNTIME.set(WryRuntime::new(event_loop_proxy)) {
+        eprintln!("start_app can only be called once per process. Exiting.");
+        return Err(());
+    }
+    // Spawn the app thread with panic handling - if the app panics, shut down the webview
+    std::thread::spawn(move || {
+        let run = || {
+            let run_app = app();
+            let wait_for_events = poll_callbacks();
+
+            start_async_runtime(Box::pin(async move {
+                futures_util::select! {
+                    _ = run_app.fuse() => {},
+                    _ = wait_for_events.fuse() => {},
+                }
+            }));
+        };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run));
+        let status = if let Err(panic_info) = result {
+            eprintln!("App thread panicked, shutting down webview");
+            // Try to print panic info
+            if let Some(s) = panic_info.downcast_ref::<&str>() {
+                eprintln!("Panic message: {s}");
+            } else if let Some(s) = panic_info.downcast_ref::<alloc::string::String>() {
+                eprintln!("Panic message: {s}");
+            }
+            1 // Exit with error status on panic
+        } else {
+            0 // Exit with success status on normal completion
+        };
+        shutdown(status);
+    });
+    
+    Ok(WryBindgen::new())
 }
 
 /// Request the application to shut down with a status code.
 ///
 /// This sends a shutdown event through the event loop, which will cause
 /// the webview to close and the application to exit with the given status code.
-pub fn shutdown(status: i32) {
+pub(crate) fn shutdown(status: i32) {
     get_runtime().shutdown(status);
 }
 
 /// Get the runtime environment.
 ///
 /// Panics if the runtime has not been initialized.
-pub fn get_runtime() -> &'static WryRuntime {
+pub(crate) fn get_runtime() -> &'static WryRuntime {
     RUNTIME.get().expect("Event loop proxy not set")
 }
 
