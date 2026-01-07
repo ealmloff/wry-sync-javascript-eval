@@ -11,7 +11,7 @@
 //! - [`encode`] - Core encoding/decoding traits for Rust types
 //! - `value` - JsValue type representing JavaScript heap references
 //! - [`function`] - JSFunction type for calling JavaScript functions
-//! - [`batch`] - Batching system for grouping multiple JS operations
+//! - [`mod@batch`] - Batching system for grouping multiple JS operations
 //! - [`runtime`] - Event loop and runtime management
 //! - `cast` - Type casting trait for JavaScript types
 //! - `lazy` - Lazy initialization for global JavaScript values
