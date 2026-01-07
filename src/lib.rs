@@ -7,24 +7,20 @@ use futures_util::FutureExt;
 use wasm_bindgen::runtime::poll_callbacks;
 use winit::event_loop::EventLoop;
 
-use wasm_bindgen::{Closure, FUNCTION_REGISTRY, FunctionRegistry};
+use wasm_bindgen::Closure;
 
 pub mod bindings;
 mod home;
 mod webview;
-pub mod wry_bindgen;
 
 use webview::State;
 
 // Re-export bindings for convenience
 pub use bindings::set_on_log;
-pub use wry_bindgen::WryBindgen;
 
 // Re-export prelude items that apps need
 pub use wasm_bindgen::JsValue;
-pub use wasm_bindgen::prelude::{
-    AppEvent, batch, set_event_loop_proxy, shutdown,
-};
+pub use wasm_bindgen::prelude::{AppEvent, batch, set_event_loop_proxy, shutdown};
 
 use crate::bindings::set_on_error;
 
@@ -131,7 +127,7 @@ where
             proxy.send_event(event).unwrap();
         })
     });
-    let registry = &*FUNCTION_REGISTRY;
+    let wry_bindgen = wasm_bindgen::wry::WryBindgen::new();
 
     // Spawn the app thread with panic handling - if the app panics, shut down the webview
     std::thread::spawn(move || {
@@ -166,7 +162,7 @@ where
         shutdown(status);
     });
 
-    let mut state = State::new(registry, proxy, headless);
+    let mut state = State::new(wry_bindgen, proxy, headless);
     event_loop.run_app(&mut state).unwrap();
 
     Ok(())
