@@ -6,17 +6,16 @@
 
 use alloc::boxed::Box;
 use alloc::rc::Rc;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use base64::Engine;
 use core::cell::RefCell;
-use std::string::ToString;
 
 use http::Response;
 
+use crate::function_registry::FUNCTION_REGISTRY;
 use crate::ipc::{DecodedVariant, IPCMessage, MessageType, decode_data};
 use crate::runtime::{AppEvent, get_runtime};
-
-use crate::FUNCTION_REGISTRY;
 
 /// Responder for wry-bindgen protocol requests.
 pub struct WryBindgenResponder {
@@ -138,10 +137,6 @@ pub struct WryBindgen {
 }
 
 impl WryBindgen {
-    /// The script you need to include in the initialization of your webview.
-    pub const INITIALIZATION_SCRIPT: &'static str = include_str!("./js/main.js");
-
-
     /// Create a new WryBindgen instance.
     ///
     /// # Arguments
@@ -156,8 +151,11 @@ impl WryBindgen {
     /// Get the initialization script that must be evaluated in the webview.
     ///
     /// This script sets up the JavaScript function registry and IPC infrastructure.
-    pub fn init_script(&self) -> &str {
-        FUNCTION_REGISTRY.script()
+    fn init_script() -> String {
+        /// The script you need to include in the initialization of your webview.
+        const INITIALIZATION_SCRIPT: &'static str = include_str!("./js/main.js");
+        let collect_functions = FUNCTION_REGISTRY.script();
+        format!("{INITIALIZATION_SCRIPT}\n{collect_functions}")
     }
 
     /// Create a protocol handler closure suitable for `WebViewBuilder::with_asynchronous_custom_protocol`.
@@ -171,49 +169,50 @@ impl WryBindgen {
     /// # Arguments
     /// * `proxy` - Function to send events to the event loop
     /// * `root_response` - Function that returns the HTML response to serve at "wry://index"
-    pub fn create_protocol_handler<F, H, R: Into<WryBindgenResponder>>(
+    pub fn create_protocol_handler<F, R: Into<WryBindgenResponder>>(
         &self,
         proxy: F,
-        root_response: H,
-    ) -> impl Fn(&http::Request<Vec<u8>>, R) + 'static
+    ) -> impl Fn(&http::Request<Vec<u8>>, R) -> Option<R> + 'static
     where
         F: Fn(AppEvent) + 'static,
-        H: Fn() -> http::Response<Vec<u8>> + 'static,
     {
         let shared = self.shared.clone();
 
         move |request: &http::Request<Vec<u8>>, responder: R| {
-            let responder = responder.into();
             let real_path = request.uri().to_string().replace("wry://", "");
             let real_path = real_path.as_str().trim_matches('/');
 
-            if real_path == "index" {
-                responder.respond(root_response());
-                return;
+            if real_path == "init" {
+                let responder = responder.into();
+                responder.respond(module_response(&Self::init_script()));
+                return None;
             }
 
             if real_path == "ready" {
                 proxy(AppEvent::WebviewLoaded);
+                let responder = responder.into();
                 responder.respond(blank_response());
-                return;
+                return None;
             }
 
             // Serve inline_js modules from snippets/
             if real_path.starts_with("snippets/") {
+                let responder = responder.into();
                 if let Some(content) = FUNCTION_REGISTRY.get_module(real_path) {
                     responder.respond(module_response(content));
-                    return;
+                    return None;
                 }
                 responder.respond(not_found_response());
-                return;
+                return None;
             }
 
             // Js sent us either an Evaluate or Respond message
             if real_path == "handler" {
+                let responder = responder.into();
                 let mut shared = shared.borrow_mut();
                 let Some(msg) = decode_request_data(request) else {
                     responder.respond(error_response());
-                    return;
+                    return None;
                 };
                 let msg_type = msg.ty().unwrap();
                 match msg_type {
@@ -235,10 +234,10 @@ impl WryBindgen {
                     }
                 }
                 get_runtime().queue_rust_call(msg);
-                return;
+                return None;
             }
 
-            responder.respond(blank_response());
+            Some(responder)
         }
     }
 
@@ -338,6 +337,7 @@ pub fn module_response(content: &str) -> http::Response<Vec<u8>> {
     http::Response::builder()
         .status(200)
         .header("Content-Type", "application/javascript")
+        .header("access-control-allow-origin", "*")
         .body(content.as_bytes().to_vec())
         .expect("Failed to build module response")
 }

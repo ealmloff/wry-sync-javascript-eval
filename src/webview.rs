@@ -39,25 +39,25 @@ impl ApplicationHandler<AppEvent> for State {
         let window = event_loop.create_window(attributes).unwrap();
 
         let proxy = self.proxy.clone();
-        let protocol_handler = self.wry_bindgen.create_protocol_handler(
-            move |event| {
-                proxy.send_event(event).unwrap();
-            },
-            root_response,
-        );
+        let protocol_handler = self.wry_bindgen.create_protocol_handler(move |event| {
+            proxy.send_event(event).unwrap();
+        });
 
         let webview = WebViewBuilder::new()
             .with_devtools(true)
             .with_asynchronous_custom_protocol("wry".into(), move |_, request, responder| {
-                protocol_handler(&request, |response| responder.respond(response));
+                let responder = |response| responder.respond(response);
+                let Some(responder) = protocol_handler(&request, responder) else {
+                    return;
+                };
+
+                responder(root_response())
             })
             .with_url("wry://index")
             .build_as_child(&window)
             .unwrap();
 
         webview.open_devtools();
-        let script = self.wry_bindgen.init_script();
-        webview.evaluate_script(script).unwrap();
 
         self.window = Some(window);
         self.webview = Some(webview);

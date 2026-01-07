@@ -135,7 +135,8 @@ pub fn start_app<F>(
     event_loop_proxy: impl Fn(AppEvent) + Send + Sync + 'static,
     app: impl FnOnce() -> F + Send + 'static,
     start_async_runtime: impl FnOnce(Pin<Box<dyn Future<Output = ()>>>) + Send + 'static,
-) -> Result<WryBindgen, ()> where
+) -> Result<WryBindgen, ()>
+where
     F: core::future::Future<Output = ()> + 'static,
 {
     let event_loop_proxy = Box::new(event_loop_proxy) as Box<dyn Fn(AppEvent) + Send + Sync>;
@@ -171,7 +172,7 @@ pub fn start_app<F>(
         };
         shutdown(status);
     });
-    
+
     Ok(WryBindgen::new())
 }
 
