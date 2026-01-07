@@ -498,3 +498,266 @@ pub(crate) fn test_instanceof_dyn_ref() {
     let num_ref: Option<&Date> = num_val.dyn_ref();
     assert!(num_ref.is_none(), "dyn_ref should return None for non-Date");
 }
+
+pub(crate) fn test_partial_eq_bool() {
+    // Test PartialEq<bool> for JsValue
+    let js_true = JsValue::from_bool(true);
+    let js_false = JsValue::from_bool(false);
+
+    assert!(js_true == true, "JsValue::TRUE should equal true");
+    assert!(js_false == false, "JsValue::FALSE should equal false");
+    assert!(js_true != false, "JsValue::TRUE should not equal false");
+    assert!(js_false != true, "JsValue::FALSE should not equal true");
+
+    // Test reverse comparison
+    assert!(true == js_true, "true should equal JsValue::TRUE");
+    assert!(false == js_false, "false should equal JsValue::FALSE");
+
+    // Test with non-bool values
+    let js_num = JsValue::from_f64(1.0);
+    assert!(js_num != true, "number 1.0 should not equal true");
+    assert!(js_num != false, "number 1.0 should not equal false");
+}
+
+pub(crate) fn test_partial_eq_numbers() {
+    // Test PartialEq for various numeric types
+    #[wasm_bindgen(inline_js = r#"
+        export function make_num(n) { return n; }
+    "#)]
+    extern "C" {
+        fn make_num(n: f64) -> JsValue;
+    }
+
+    let js_42 = make_num(42.0);
+    let js_neg = make_num(-17.5);
+    let js_zero = make_num(0.0);
+
+    // Test f64
+    assert!(js_42 == 42.0_f64, "JsValue 42.0 should equal f64 42.0");
+    assert!(js_neg == -17.5_f64, "JsValue -17.5 should equal f64 -17.5");
+    assert!(42.0_f64 == js_42, "f64 42.0 should equal JsValue 42.0");
+
+    // Test f32
+    assert!(js_42 == 42.0_f32, "JsValue 42.0 should equal f32 42.0");
+    assert!(42.0_f32 == js_42, "f32 42.0 should equal JsValue 42.0");
+
+    // Test i32
+    assert!(js_42 == 42_i32, "JsValue 42.0 should equal i32 42");
+    assert!(42_i32 == js_42, "i32 42 should equal JsValue 42.0");
+
+    // Test u32
+    assert!(js_42 == 42_u32, "JsValue 42.0 should equal u32 42");
+    assert!(42_u32 == js_42, "u32 42 should equal JsValue 42.0");
+
+    // Test i8, i16, u8, u16
+    assert!(js_42 == 42_i8, "JsValue should equal i8");
+    assert!(js_42 == 42_i16, "JsValue should equal i16");
+    assert!(js_42 == 42_u8, "JsValue should equal u8");
+    assert!(js_42 == 42_u16, "JsValue should equal u16");
+
+    // Test zero
+    assert!(js_zero == 0_i32, "JsValue 0 should equal 0");
+    assert!(js_zero == 0.0_f64, "JsValue 0 should equal 0.0");
+
+    // Test usize and isize
+    assert!(js_42 == 42_usize, "JsValue should equal usize");
+    assert!(js_42 == 42_isize, "JsValue should equal isize");
+}
+
+pub(crate) fn test_partial_eq_strings() {
+    // Test PartialEq for string types
+    let js_hello = JsValue::from_str("hello");
+
+    // Test &str
+    assert!(js_hello == "hello", "JsValue should equal &str");
+    assert!("hello" == js_hello, "&str should equal JsValue");
+    assert!(js_hello != "world", "JsValue should not equal different &str");
+
+    // Test String
+    let hello_string = String::from("hello");
+    assert!(js_hello == hello_string, "JsValue should equal String");
+    assert!(hello_string == js_hello, "String should equal JsValue");
+
+    // Test &String
+    assert!(js_hello == &hello_string, "JsValue should equal &String");
+    assert!(&hello_string == js_hello, "&String should equal JsValue");
+
+    // Test with non-string
+    let js_num = JsValue::from_f64(42.0);
+    assert!(js_num != "42", "number JsValue should not equal string '42'");
+}
+
+pub(crate) fn test_try_from_f64() {
+    // Test TryFrom<JsValue> for f64
+    #[wasm_bindgen(inline_js = r#"
+        export function get_number(n) { return n; }
+        export function get_string(s) { return s; }
+    "#)]
+    extern "C" {
+        fn get_number(n: f64) -> JsValue;
+        fn get_string(s: &str) -> JsValue;
+    }
+
+    // Successful conversion
+    let js_num = get_number(42.5);
+    let result: Result<f64, _> = js_num.try_into();
+    assert!(result.is_ok(), "TryFrom<JsValue> for f64 should succeed for number");
+    assert_eq!(result.unwrap(), 42.5);
+
+    // Failed conversion (string is not a number)
+    let js_str = get_string("not a number");
+    let result: Result<f64, _> = js_str.try_into();
+    assert!(result.is_err(), "TryFrom<JsValue> for f64 should fail for string");
+
+    // Test TryFrom<&JsValue> for f64
+    let js_num2 = get_number(100.0);
+    let result: Result<f64, _> = (&js_num2).try_into();
+    assert!(result.is_ok(), "TryFrom<&JsValue> for f64 should succeed");
+    assert_eq!(result.unwrap(), 100.0);
+}
+
+pub(crate) fn test_try_from_string() {
+    // Test TryFrom<JsValue> for String
+    #[wasm_bindgen(inline_js = r#"
+        export function get_string(s) { return s; }
+        export function get_number(n) { return n; }
+    "#)]
+    extern "C" {
+        fn get_string(s: &str) -> JsValue;
+        fn get_number(n: f64) -> JsValue;
+    }
+
+    // Successful conversion
+    let js_str = get_string("hello world");
+    let result: Result<String, _> = js_str.try_into();
+    assert!(result.is_ok(), "TryFrom<JsValue> for String should succeed for string");
+    assert_eq!(result.unwrap(), "hello world");
+
+    // Failed conversion (number is not a string)
+    let js_num = get_number(42.0);
+    let result: Result<String, _> = js_num.try_into();
+    assert!(result.is_err(), "TryFrom<JsValue> for String should fail for number");
+}
+
+pub(crate) fn test_owned_arithmetic_operators() {
+    // Test arithmetic operators with owned JsValue
+    #[wasm_bindgen(inline_js = r#"
+        export function get_num(n) { return n; }
+        export function js_to_f64(v) { return +v; }
+    "#)]
+    extern "C" {
+        fn get_num(n: f64) -> JsValue;
+        fn js_to_f64(v: &JsValue) -> f64;
+    }
+
+    // Test owned + owned
+    let result = get_num(10.0) + get_num(5.0);
+    assert_eq!(js_to_f64(&result), 15.0, "owned + owned should work");
+
+    // Test owned + ref
+    let b = get_num(3.0);
+    let result = get_num(10.0) + &b;
+    assert_eq!(js_to_f64(&result), 13.0, "owned + ref should work");
+
+    // Test ref + owned
+    let a = get_num(10.0);
+    let result = &a + get_num(7.0);
+    assert_eq!(js_to_f64(&result), 17.0, "ref + owned should work");
+
+    // Test subtraction
+    let result = get_num(10.0) - get_num(3.0);
+    assert_eq!(js_to_f64(&result), 7.0, "owned - owned should work");
+
+    // Test multiplication
+    let result = get_num(6.0) * get_num(7.0);
+    assert_eq!(js_to_f64(&result), 42.0, "owned * owned should work");
+
+    // Test division
+    let result = get_num(20.0) / get_num(4.0);
+    assert_eq!(js_to_f64(&result), 5.0, "owned / owned should work");
+
+    // Test remainder
+    let result = get_num(17.0) % get_num(5.0);
+    assert_eq!(js_to_f64(&result), 2.0, "owned % owned should work");
+
+    // Test negation
+    let result = -get_num(42.0);
+    assert_eq!(js_to_f64(&result), -42.0, "owned negation should work");
+}
+
+pub(crate) fn test_owned_bitwise_operators() {
+    // Test bitwise operators with owned JsValue
+    #[wasm_bindgen(inline_js = r#"
+        export function make_num(n) { return n; }
+        export function to_int(v) { return v | 0; }
+    "#)]
+    extern "C" {
+        fn make_num(n: f64) -> JsValue;
+        fn to_int(v: &JsValue) -> i32;
+    }
+
+    // Test owned & owned
+    let result = make_num(10.0) & make_num(12.0);
+    assert_eq!(to_int(&result), 8, "owned & owned should work");
+
+    // Test owned | owned
+    let result = make_num(10.0) | make_num(12.0);
+    assert_eq!(to_int(&result), 14, "owned | owned should work");
+
+    // Test owned ^ owned
+    let result = make_num(10.0) ^ make_num(12.0);
+    assert_eq!(to_int(&result), 6, "owned ^ owned should work");
+
+    // Test owned << owned
+    let result = make_num(5.0) << make_num(2.0);
+    assert_eq!(to_int(&result), 20, "owned << owned should work");
+
+    // Test owned >> owned
+    let result = make_num(20.0) >> make_num(2.0);
+    assert_eq!(to_int(&result), 5, "owned >> owned should work");
+
+    // Test !owned (bitwise not)
+    let result = !make_num(10.0);
+    assert_eq!(to_int(&result), !10, "owned ! should work");
+
+    // Test mixed ownership
+    let a = make_num(10.0);
+    let result = &a & make_num(12.0);
+    assert_eq!(to_int(&result), 8, "ref & owned should work");
+
+    let b = make_num(12.0);
+    let result = make_num(10.0) & &b;
+    assert_eq!(to_int(&result), 8, "owned & ref should work");
+}
+
+pub(crate) fn test_jscast_as_ref() {
+    #![allow(unused_imports)]
+    use wasm_bindgen::JsCast;
+
+    // Test using JsCast's as_ref() to get &JsValue from a typed object
+    #[wasm_bindgen(inline_js = r#"
+        export function create_array() { return [1, 2, 3]; }
+        export function get_length(arr) { return arr.length; }
+    "#)]
+    extern "C" {
+        type Array;
+
+        fn create_array() -> Array;
+        fn get_length(arr: &JsValue) -> i32;
+    }
+
+    let arr = create_array();
+
+    // Use AsRef<JsValue> from JsCast to get a reference
+    let js_ref: &JsValue = arr.as_ref();
+
+    // Verify it's the same array by checking length
+    assert_eq!(get_length(js_ref), 3, "JsCast::as_ref should return correct &JsValue");
+}
+
+pub(crate) fn test_as_ref_jsvalue() {
+    // Test AsRef<JsValue> for JsValue
+    let val = JsValue::from_f64(42.0);
+    let val_ref: &JsValue = val.as_ref();
+    assert_eq!(val_ref.as_f64(), Some(42.0), "AsRef<JsValue> should return self");
+}

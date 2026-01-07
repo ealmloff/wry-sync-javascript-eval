@@ -141,6 +141,71 @@ impl TryFrom<JsValue> for i64 {
     }
 }
 
+impl TryFrom<JsValue> for f64 {
+    type Error = JsValue;
+
+    fn try_from(value: JsValue) -> Result<Self, Self::Error> {
+        value.as_f64().ok_or(value)
+    }
+}
+
+impl TryFrom<&JsValue> for f64 {
+    type Error = ();
+
+    fn try_from(value: &JsValue) -> Result<Self, Self::Error> {
+        value.as_f64().ok_or(())
+    }
+}
+
+impl TryFrom<JsValue> for i128 {
+    type Error = JsValue;
+
+    fn try_from(value: JsValue) -> Result<Self, Self::Error> {
+        #[wasm_bindgen(crate = crate, inline_js = "export function BigIntAsI128(val) {
+            if (typeof val !== 'bigint') {
+                throw new Error('Value is not a BigInt');
+            }
+            return Number(val);
+        }")]
+        extern "C" {
+            #[wasm_bindgen(js_name = "BigIntAsI128")]
+            fn big_int_as_i128(val: &JsValue) -> Result<i128, JsValue>;
+        }
+
+        big_int_as_i128(&value)
+    }
+}
+
+impl TryFrom<JsValue> for u128 {
+    type Error = JsValue;
+
+    fn try_from(value: JsValue) -> Result<Self, Self::Error> {
+        #[wasm_bindgen(crate = crate, inline_js = "export function BigIntAsU128(val) {
+            if (typeof val !== 'bigint') {
+                throw new Error('Value is not a BigInt');
+            }
+            if (val < 0n) {
+                throw new Error('Value is negative');
+            }
+            return Number(val);
+        }")]
+        extern "C" {
+            #[wasm_bindgen(js_name = "BigIntAsU128")]
+            fn big_int_as_u128(val: &JsValue) -> Result<u128, JsValue>;
+        }
+
+        big_int_as_u128(&value)
+    }
+}
+
+impl TryFrom<JsValue> for String {
+    type Error = JsValue;
+
+    fn try_from(value: JsValue) -> Result<Self, Self::Error> {
+        value.as_string().ok_or(value)
+    }
+}
+
 to_js_value!(i8);
 from_js_value!(i8);
 to_js_value!(i16);
@@ -149,7 +214,6 @@ to_js_value!(i32);
 from_js_value!(i32);
 to_js_value!(i64);
 to_js_value!(i128);
-from_js_value!(i128);
 to_js_value!(u8);
 from_js_value!(u8);
 to_js_value!(u16);
@@ -158,29 +222,24 @@ to_js_value!(u32);
 from_js_value!(u32);
 to_js_value!(u64);
 to_js_value!(u128);
-from_js_value!(u128);
 to_js_value!(f32);
 from_js_value!(f32);
 to_js_value!(f64);
-from_js_value!(f64);
 to_js_value!(usize);
 from_js_value!(usize);
 to_js_value!(isize);
 from_js_value!(isize);
-// Manual impl for &str since it has a lifetime and wbg_cast requires 'static
 impl From<&str> for JsValue {
     fn from(val: &str) -> Self {
         cast! {(String => JsValue) val.to_string()}
     }
 }
-// Manual impl for &String
 impl From<&String> for JsValue {
     fn from(val: &String) -> Self {
         cast! {(String => JsValue) val.clone()}
     }
 }
 to_js_value!(String);
-from_js_value!(String);
 to_js_value!(());
 from_js_value!(());
 
@@ -349,6 +408,10 @@ where
         }
     }
 }
+
+// Note: From<&T> for JsValue where T: JsCast is NOT implemented here.
+// Instead, each type that needs this conversion gets its own impl generated
+// by the #[wasm_bindgen] macro. This avoids conflicts with those generated impls.
 
 impl AsRef<JsValue> for JsError {
     fn as_ref(&self) -> &JsValue {
