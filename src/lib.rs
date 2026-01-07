@@ -109,7 +109,7 @@ where
         }
 
         winit::platform::x11::register_xlib_error_hook(Box::new(|_display, error| {
-            let error = error as *mut x11_dl::xlib::ErrorEvent;
+            let error = error as *mut x11_dl::xlib::XErrorEvent;
             (unsafe { (*error).error_code }) == 170
         }));
     }
