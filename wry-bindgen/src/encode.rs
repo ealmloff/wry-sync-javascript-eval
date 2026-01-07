@@ -554,9 +554,11 @@ impl BinaryEncode for JsValue {
 impl BinaryDecode for JsValue {
     fn decode(_: &mut DecodedData) -> Result<Self, DecodeError> {
         // JS value is always in sync with the dom. We should never need to decode it.
+        // Use get_next_heap_id() (NOT get_next_placeholder_id()) because decode() is
+        // called for callback parameters from JS, not for return value placeholders.
         BATCH_STATE.with(|state| {
             let mut batch = state.borrow_mut();
-            Ok(Self::batched_placeholder(&mut batch))
+            Ok(JsValue::from_id(batch.get_next_heap_id()))
         })
     }
 }
@@ -567,7 +569,8 @@ impl BatchableResult for JsValue {
     }
 
     fn batched_placeholder(batch: &mut BatchState) -> Self {
-        JsValue::from_id(batch.get_next_heap_id())
+        // Use get_next_placeholder_id() to track reserved slots for JS
+        JsValue::from_id(batch.get_next_placeholder_id())
     }
 }
 

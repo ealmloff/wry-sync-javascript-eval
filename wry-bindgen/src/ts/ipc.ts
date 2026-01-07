@@ -15,7 +15,7 @@
 
 import { DataDecoder, DataEncoder } from "./encoding";
 import { getFunctionRegistry, getTypeCache, CachedTypeInfo } from "./function_registry";
-import { parseTypeDef, TypeClass } from "./types";
+import { parseTypeDef, TypeClass, HeapRefType } from "./types";
 
 enum MessageType {
   Evaluate = 0,
@@ -141,6 +141,11 @@ function handleBinaryResponse(
   } else if (msgType === MessageType.Evaluate) {
     // Evaluate - Rust is calling JS functions (possibly multiple)
 
+    // Read the reserved placeholder count and push a reservation scope
+    // This ensures nested callback allocations skip these reserved IDs
+    const reservedCount = decoder.takeU32();
+    window.jsHeap.pushReservationScope(reservedCount);
+
     const encoder = new DataEncoder();
     encoder.pushU8(MessageType.Respond);
 
@@ -167,12 +172,22 @@ function handleBinaryResponse(
       // Call the original JS function with decoded parameters
       const result = jsFunction(...params);
 
-      // Encode the result using the return type
-      typeInfo.returnType.encode(encoder, result);
+      // If return type is HeapRef and we have reserved slots, fill the next reserved slot
+      // instead of calling encode(). This ensures the ID matches what Rust pre-allocated.
+      // When reservedCount is 0 (non-batch mode), fall back to normal encode() behavior.
+      if (typeInfo.returnType instanceof HeapRefType && reservedCount > 0) {
+        window.jsHeap.fillNextReserved(result);
+      } else {
+        // Encode the result using the return type
+        typeInfo.returnType.encode(encoder, result);
+      }
     }
 
     // Pop the borrow frame after all operations complete
     window.jsHeap.popBorrowFrame();
+
+    // Pop the reservation scope
+    window.jsHeap.popReservationScope();
 
     const nextResponse = sync_request_binary(
       "wry://handler",

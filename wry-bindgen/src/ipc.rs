@@ -342,6 +342,12 @@ impl EncodedData {
         self.u32_buf.push(value);
     }
 
+    /// Prepend a u32 to the beginning of the buffer.
+    /// Used to add the reserved placeholder count at the start of batch messages.
+    pub fn prepend_u32(&mut self, value: u32) {
+        self.u32_buf.insert(0, value);
+    }
+
     /// Push a u64 to the buffer (stored as two u32s).
     pub(crate) fn push_u64(&mut self, value: u64) {
         self.push_u32((value & 0xFFFFFFFF) as u32);

@@ -57,11 +57,11 @@ pub fn bench_roundtrip_i64() {
 }
 
 pub fn bench_roundtrip_f32() {
-    let _ = identity_f32(3.14159);
+    let _ = identity_f32(std::f32::consts::PI);
 }
 
 pub fn bench_roundtrip_f64() {
-    let _ = identity_f64(3.14159);
+    let _ = identity_f64(std::f64::consts::PI);
 }
 
 pub fn bench_roundtrip_bool() {
