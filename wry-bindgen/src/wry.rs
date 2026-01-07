@@ -136,6 +136,12 @@ pub struct WryBindgen {
     state: RefCell<WebviewLoadingState>,
 }
 
+impl Default for WryBindgen {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WryBindgen {
     /// Create a new WryBindgen instance.
     ///
@@ -153,7 +159,7 @@ impl WryBindgen {
     /// This script sets up the JavaScript function registry and IPC infrastructure.
     fn init_script() -> String {
         /// The script you need to include in the initialization of your webview.
-        const INITIALIZATION_SCRIPT: &'static str = include_str!("./js/main.js");
+        const INITIALIZATION_SCRIPT: &str = include_str!("./js/main.js");
         let collect_functions = FUNCTION_REGISTRY.script();
         format!("{INITIALIZATION_SCRIPT}\n{collect_functions}")
     }

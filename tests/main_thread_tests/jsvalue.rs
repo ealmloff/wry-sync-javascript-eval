@@ -582,8 +582,8 @@ pub(crate) fn test_partial_eq_strings() {
     assert!(hello_string == js_hello, "String should equal JsValue");
 
     // Test &String
-    assert!(js_hello == &hello_string, "JsValue should equal &String");
-    assert!(&hello_string == js_hello, "&String should equal JsValue");
+    assert!(js_hello == hello_string, "JsValue should equal &String");
+    assert!(hello_string == js_hello, "&String should equal JsValue");
 
     // Test with non-string
     let js_num = JsValue::from_f64(42.0);

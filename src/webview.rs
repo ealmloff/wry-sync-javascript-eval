@@ -93,7 +93,7 @@ impl ApplicationHandler<AppEvent> for State {
         if let Some(webview) = &self.webview
             && let Some(status) = self.wry_bindgen.handle_user_event(event, |script| {
                 if let Err(err) = webview.evaluate_script(script) {
-                    eprintln!("Error evaluating script: {}", err);
+                    eprintln!("Error evaluating script: {err}");
                 }
             })
         {

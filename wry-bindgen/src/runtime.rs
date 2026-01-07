@@ -3,6 +3,8 @@
 //! This module handles the connection between the Rust runtime and the
 //! JavaScript environment via winit's event loop.
 
+use core::error::Error;
+use core::fmt::Display;
 use core::pin::Pin;
 
 use alloc::boxed::Box;
@@ -163,19 +165,31 @@ impl WryRuntime {
 
 static RUNTIME: OnceCell<WryRuntime> = OnceCell::new();
 
+/// Error indicating that the runtime has already been started.
+#[derive(Debug)]
+pub struct AlreadyStartedError;
+
+impl Display for AlreadyStartedError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "The runtime has already been started")
+    }
+}
+
+impl Error for AlreadyStartedError {}
+
 /// Start the application thread with the given event loop proxy
 pub fn start_app<F>(
     event_loop_proxy: impl Fn(AppEvent) + Send + Sync + 'static,
     app: impl FnOnce() -> F + Send + 'static,
     start_async_runtime: impl FnOnce(Pin<Box<dyn Future<Output = ()>>>) + Send + 'static,
-) -> Result<WryBindgen, ()>
+) -> Result<WryBindgen, AlreadyStartedError>
 where
     F: core::future::Future<Output = ()> + 'static,
 {
     let event_loop_proxy = Box::new(event_loop_proxy) as Box<dyn Fn(AppEvent) + Send + Sync>;
-    if let Err(_) = RUNTIME.set(WryRuntime::new(event_loop_proxy)) {
+    if RUNTIME.set(WryRuntime::new(event_loop_proxy)).is_err() {
         eprintln!("start_app can only be called once per process. Exiting.");
-        return Err(());
+        return Err(AlreadyStartedError);
     }
     // Spawn the app thread with panic handling - if the app panics, shut down the webview
     std::thread::spawn(move || {
