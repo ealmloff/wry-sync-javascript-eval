@@ -2,6 +2,7 @@ use tokio::select;
 use wasm_bindgen::{batch::batch_async, wasm_bindgen};
 
 mod add_number_js;
+#[allow(clippy::redundant_closure)]
 mod async_bindings;
 mod borrow_stack;
 mod callbacks;

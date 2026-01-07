@@ -58,39 +58,38 @@ fn main() {
         );
         println!("{:-<100}", "");
 
-        let mut results = Vec::new();
-
-        results.push(bench("roundtrip/u32", roundtrip::bench_roundtrip_u32));
-        results.push(bench("roundtrip/u64", roundtrip::bench_roundtrip_u64));
-        results.push(bench("roundtrip/i32", roundtrip::bench_roundtrip_i32));
-        results.push(bench("roundtrip/i64", roundtrip::bench_roundtrip_i64));
-        results.push(bench("roundtrip/f32", roundtrip::bench_roundtrip_f32));
-        results.push(bench("roundtrip/f64", roundtrip::bench_roundtrip_f64));
-        results.push(bench("roundtrip/bool", roundtrip::bench_roundtrip_bool));
-        results.push(bench("roundtrip/string", roundtrip::bench_roundtrip_string));
-        results.push(bench(
-            "roundtrip/large-string",
-            roundtrip::bench_roundtrip_large_string,
-        ));
-        results.push(bench(
-            "roundtrip/option_some",
-            roundtrip::bench_roundtrip_option_some,
-        ));
-        results.push(bench(
-            "roundtrip/option_none",
-            roundtrip::bench_roundtrip_option_none,
-        ));
-
-        results.push(bench("batch/add_1_calls", batching::bench_batch_add_1));
-        results.push(bench("batch/add_100_calls", batching::bench_batch_add_100));
-        results.push(bench(
-            "batch/create_element_1_calls",
-            batching::bench_batch_create_element_1,
-        ));
-        results.push(bench(
-            "batch/create_element_100_calls",
-            batching::bench_batch_create_element_100,
-        ));
+        let results = vec![
+            bench("roundtrip/u32", roundtrip::bench_roundtrip_u32),
+            bench("roundtrip/u64", roundtrip::bench_roundtrip_u64),
+            bench("roundtrip/i32", roundtrip::bench_roundtrip_i32),
+            bench("roundtrip/i64", roundtrip::bench_roundtrip_i64),
+            bench("roundtrip/f32", roundtrip::bench_roundtrip_f32),
+            bench("roundtrip/f64", roundtrip::bench_roundtrip_f64),
+            bench("roundtrip/bool", roundtrip::bench_roundtrip_bool),
+            bench("roundtrip/string", roundtrip::bench_roundtrip_string),
+            bench(
+                "roundtrip/large-string",
+                roundtrip::bench_roundtrip_large_string,
+            ),
+            bench(
+                "roundtrip/option_some",
+                roundtrip::bench_roundtrip_option_some,
+            ),
+            bench(
+                "roundtrip/option_none",
+                roundtrip::bench_roundtrip_option_none,
+            ),
+            bench("batch/add_1_calls", batching::bench_batch_add_1),
+            bench("batch/add_100_calls", batching::bench_batch_add_100),
+            bench(
+                "batch/create_element_1_calls",
+                batching::bench_batch_create_element_1,
+            ),
+            bench(
+                "batch/create_element_100_calls",
+                batching::bench_batch_create_element_100,
+            ),
+        ];
 
         for result in &results {
             result.print();

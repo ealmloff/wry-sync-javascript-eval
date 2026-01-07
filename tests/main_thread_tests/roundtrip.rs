@@ -29,8 +29,8 @@ pub(crate) fn test_roundtrip() {
     roundtrip!(i16, -42i16);
     roundtrip!(i32, -42i32);
     roundtrip!(i64, -42i64);
-    roundtrip!(f32, 3.14159f32);
-    roundtrip!(f64, 3.14159f64);
+    roundtrip!(f32, std::f32::consts::PI);
+    roundtrip!(f64, std::f64::consts::PI);
     roundtrip!(String, "Hello, world!".to_string());
     roundtrip!(bool, true);
     roundtrip!(bool, false);
