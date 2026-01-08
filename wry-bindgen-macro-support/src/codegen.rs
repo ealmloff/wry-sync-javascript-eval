@@ -266,12 +266,8 @@ fn generate_type(ty: &ImportType, krate: &TokenStream) -> syn::Result<TokenStrea
     // Generate BatchableResult implementation
     let batchable_impl = quote_spanned! {span=>
         impl #krate::BatchableResult for #rust_name {
-            fn needs_flush() -> bool {
-                false
-            }
-
-            fn batched_placeholder(batch: &mut #krate::batch::Runtime) -> Self {
-                Self { obj: <#krate::JsValue as #krate::BatchableResult>::batched_placeholder(batch) }
+            fn try_placeholder(batch: &mut #krate::batch::Runtime) -> ::core::option::Option<Self> {
+                ::core::option::Option::Some(Self { obj: #krate::BatchableResult::try_placeholder(batch)? })
             }
         }
     };
@@ -1061,15 +1057,7 @@ fn generate_string_enum(string_enum: &StringEnum, krate: &TokenStream) -> syn::R
 
     // Generate BatchableResult implementation
     let batchable_impl = quote! {
-        impl #krate::BatchableResult for #enum_name {
-            fn needs_flush() -> bool {
-                true
-            }
-
-            fn batched_placeholder(_batch: &mut #krate::batch::Runtime) -> Self {
-                ::core::unreachable!("needs_flush types should never call batched_placeholder")
-            }
-        }
+        impl #krate::BatchableResult for #enum_name {}
     };
 
     // Generate From<EnumName> for JsValue
@@ -1212,15 +1200,7 @@ fn generate_export_struct(s: &ExportStruct, krate: &TokenStream) -> syn::Result<
 
     // Generate BatchableResult - exported structs need flush to get actual value
     let batchable_result_impl = quote_spanned! {span=>
-        impl #krate::BatchableResult for #rust_name {
-            fn needs_flush() -> bool {
-                true
-            }
-
-            fn batched_placeholder(_: &mut #krate::batch::Runtime) -> Self {
-                ::core::unreachable!("needs_flush types should never call batched_placeholder")
-            }
-        }
+        impl #krate::BatchableResult for #rust_name {}
     };
 
     Ok(quote_spanned! {span=>

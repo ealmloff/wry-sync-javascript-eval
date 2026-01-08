@@ -40,15 +40,17 @@ pub trait IntoClosure<M, Output> {
 /// Trait for return types that can be used in batched JS calls.
 /// Determines how the type behaves during batching.
 pub trait BatchableResult: BinaryDecode {
-    /// Whether this result type requires flushing the batch to get the actual value.
-    /// Returns false for opaque types (placeholder) and trivial types (known value).
-    fn needs_flush() -> bool;
-
-    /// Get a placeholder/trivial value during batching.
-    /// For opaque types, this reserves a heap ID from the batch.
+    /// Returns Some(placeholder) for opaque types that can be batched,
+    /// None for types that require flushing to get the actual value.
+    ///
+    /// For opaque types (JsValue, Closure), this reserves a heap ID and returns a placeholder.
     /// For trivial types like (), this returns the known value.
-    /// For types that need_flush, this is never called.
-    fn batched_placeholder(batch: &mut Runtime) -> Self;
+    /// For value types (primitives, String, Vec, etc.), returns None to trigger a flush.
+    ///
+    /// Default implementation returns None (requires flush).
+    fn try_placeholder(_: &mut Runtime) -> Option<Self> {
+        None
+    }
 }
 
 /// Marker for cached type definition (type already sent, just reference by ID)
@@ -116,11 +118,9 @@ pub trait EncodeTypeDef {
 // Unit type implementations
 
 impl BatchableResult for () {
-    fn needs_flush() -> bool {
-        false
+    fn try_placeholder(_: &mut Runtime) -> Option<Self> {
+        Some(())
     }
-
-    fn batched_placeholder(_: &mut Runtime) -> Self {}
 }
 
 impl EncodeTypeDef for () {
@@ -496,16 +496,7 @@ impl<T: BinaryEncode<P>, P> BinaryEncode<P> for Option<T> {
     }
 }
 
-impl<T: BinaryDecode> BatchableResult for Option<T> {
-    fn needs_flush() -> bool {
-        // We need to read the response to know if it's Some or None
-        true
-    }
-
-    fn batched_placeholder(_batch: &mut Runtime) -> Self {
-        unreachable!("needs_flush types should never call batched_placeholder")
-    }
-}
+impl<T: BinaryDecode> BatchableResult for Option<T> {}
 
 impl<T: EncodeTypeDef, E: EncodeTypeDef> EncodeTypeDef for Result<T, E> {
     fn encode_type_def(buf: &mut Vec<u8>) {
@@ -527,16 +518,7 @@ impl<T: BinaryDecode, E: BinaryDecode> BinaryDecode for Result<T, E> {
     }
 }
 
-impl<T: BinaryDecode, E: BinaryDecode> BatchableResult for Result<T, E> {
-    fn needs_flush() -> bool {
-        // We need to read the response to know if it's Ok or Err
-        true
-    }
-
-    fn batched_placeholder(_batch: &mut Runtime) -> Self {
-        unreachable!("needs_flush types should never call batched_placeholder")
-    }
-}
+impl<T: BinaryDecode, E: BinaryDecode> BatchableResult for Result<T, E> {}
 
 impl EncodeTypeDef for JsValue {
     fn encode_type_def(buf: &mut Vec<u8>) {
@@ -563,47 +545,29 @@ impl BinaryDecode for JsValue {
 }
 
 impl BatchableResult for JsValue {
-    fn needs_flush() -> bool {
-        false
-    }
-
-    fn batched_placeholder(batch: &mut Runtime) -> Self {
+    fn try_placeholder(batch: &mut Runtime) -> Option<Self> {
         // Use get_next_placeholder_id() to track reserved slots for JS
-        JsValue::from_id(batch.get_next_placeholder_id())
+        Some(JsValue::from_id(batch.get_next_placeholder_id()))
     }
 }
 
 impl<F: ?Sized> BatchableResult for Closure<F> {
-    fn needs_flush() -> bool {
-        false
-    }
-
-    fn batched_placeholder(batch: &mut Runtime) -> Self {
-        Closure {
+    fn try_placeholder(batch: &mut Runtime) -> Option<Self> {
+        Some(Closure {
             _phantom: PhantomData,
-            value: JsValue::batched_placeholder(batch),
-        }
+            value: JsValue::try_placeholder(batch)?,
+        })
     }
 }
 
-/// Implement BatchableResult for types that always need a flush to get the result.
-macro_rules! impl_needs_flush {
+/// Implement BatchableResult for value types that always need a flush to get the result.
+macro_rules! impl_value_type {
     ($($ty:ty),*) => {
-        $(
-            impl BatchableResult for $ty {
-                fn needs_flush() -> bool {
-                    true
-                }
-
-                fn batched_placeholder(_batch: &mut Runtime) -> Self {
-                    unreachable!("needs_flush types should never call batched_placeholder")
-                }
-            }
-        )*
+        $(impl BatchableResult for $ty {})*
     };
 }
 
-impl_needs_flush!(
+impl_value_type!(
     bool, u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, isize, usize, f32, f64, String
 );
 
@@ -1285,15 +1249,7 @@ impl<T: BinaryDecode> BinaryDecode for Vec<T> {
     }
 }
 
-impl<T: BinaryDecode> BatchableResult for Vec<T> {
-    fn needs_flush() -> bool {
-        true
-    }
-
-    fn batched_placeholder(_batch: &mut Runtime) -> Self {
-        unreachable!("needs_flush types should never call batched_placeholder")
-    }
-}
+impl<T: BinaryDecode> BatchableResult for Vec<T> {}
 
 impl<T> BinaryEncode for &[T]
 where
@@ -1379,12 +1335,4 @@ impl BinaryDecode for Clamped<Vec<u8>> {
     }
 }
 
-impl BatchableResult for Clamped<Vec<u8>> {
-    fn needs_flush() -> bool {
-        true
-    }
-
-    fn batched_placeholder(_batch: &mut Runtime) -> Self {
-        unreachable!("needs_flush types should never call batched_placeholder")
-    }
-}
+impl BatchableResult for Clamped<Vec<u8>> {}
