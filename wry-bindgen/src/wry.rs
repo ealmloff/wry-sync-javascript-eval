@@ -17,7 +17,6 @@ use crate::function_registry::FUNCTION_REGISTRY;
 use crate::ipc::{DecodedVariant, IPCMessage, MessageType, decode_data};
 use crate::runtime::{AppEvent, AppEventVariant, get_runtime};
 
-
 // Each platform has a different custom protocol scheme
 #[cfg(target_os = "android")]
 pub const BASE_URL: &str = "https://wry.index.html";
@@ -195,10 +194,11 @@ impl WryBindgen {
         let shared = self.shared.clone();
 
         move |request: &http::Request<Vec<u8>>, responder: R| {
-            // Handle both wry:// (unix) and http://wry.localhost/ (windows) schemes
             let uri = request.uri().to_string();
             let real_path = uri
-                .strip_prefix(BASE_URL)
+                .strip_prefix("wry://index.html")
+                .or_else(|| uri.strip_prefix("http://wry.index.html"))
+                .or_else(|| uri.strip_prefix("https://wry.index.html"))
                 .unwrap_or(&uri);
             let real_path = real_path.trim_matches('/');
 
