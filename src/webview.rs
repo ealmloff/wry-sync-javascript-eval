@@ -6,10 +6,12 @@ use tao::{
 };
 use wry::WebViewBuilder;
 
-use wasm_bindgen::{runtime::AppEvent, wry::{BASE_URL, WryBindgen}};
+use wasm_bindgen::{
+    runtime::AppEvent,
+    wry::{BASE_URL, WryBindgen},
+};
 
 use crate::home::root_response;
-
 
 const PROTOCOL_SCHEME: &str = "wry";
 
