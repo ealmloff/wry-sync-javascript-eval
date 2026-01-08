@@ -3,6 +3,7 @@
 //! This module provides the batching infrastructure that allows multiple
 //! JS operations to be grouped together for efficient execution.
 
+use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 use std::boxed::Box;
@@ -37,6 +38,10 @@ pub struct BatchState {
     /// Count of IDs reserved as placeholders during the current batch.
     /// This is sent to JS so it can skip these IDs during nested callback allocations.
     reserved_placeholder_count: u32,
+    /// Type cache for avoiding resending type definitions to JS
+    type_cache: BTreeMap<Vec<u8>, u32>,
+    /// Next type ID to assign
+    next_type_id: u32,
 }
 
 impl BatchState {
@@ -54,6 +59,10 @@ impl BatchState {
             borrow_frame_stack: Vec::new(),
             // No reserved placeholders initially
             reserved_placeholder_count: 0,
+            // Type cache starts empty
+            type_cache: BTreeMap::new(),
+            // Type IDs start at 0
+            next_type_id: 0,
         }
     }
 
@@ -187,6 +196,19 @@ impl BatchState {
         self.encoder.u16_buf.extend_from_slice(&other.u16_buf);
         self.encoder.u32_buf.extend_from_slice(&other.u32_buf);
         self.encoder.str_buf.extend_from_slice(&other.str_buf);
+    }
+
+    /// Get or create a type ID for the given type definition bytes.
+    /// Returns (type_id, is_cached) where is_cached is true if the type was already in the cache.
+    pub(crate) fn get_or_create_type_id(&mut self, type_bytes: Vec<u8>) -> (u32, bool) {
+        if let Some(&id) = self.type_cache.get(&type_bytes) {
+            (id, true)
+        } else {
+            let id = self.next_type_id;
+            self.next_type_id += 1;
+            self.type_cache.insert(type_bytes, id);
+            (id, false)
+        }
     }
 }
 

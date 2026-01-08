@@ -8,10 +8,9 @@
 #![allow(clippy::type_complexity)]
 
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::any::Any;
-use core::cell::{Cell, RefCell};
+use core::cell::RefCell;
 use core::marker::PhantomData;
 
 use slotmap::{DefaultKey, SlotMap};
@@ -29,13 +28,6 @@ pub const DROP_NATIVE_REF_FN_ID: u32 = 0xFFFFFFFF;
 /// JS sends this with the export name to call the appropriate handler.
 pub const CALL_EXPORT_FN_ID: u32 = 0xFFFFFFFE;
 
-thread_local! {
-    /// Cache mapping type definition bytes to the assigned type_id for the JS side
-    static TYPE_CACHE: RefCell<BTreeMap<Vec<u8>, u32>> = const { RefCell::new(BTreeMap::new()) };
-    /// Next type ID to assign
-    static NEXT_TYPE_ID: Cell<u32> = const { Cell::new(0) };
-}
-
 /// Encode type definitions for a function call.
 /// On first call for a type signature, sends TYPE_FULL + id + param_count + type defs.
 /// On subsequent calls, sends TYPE_CACHED + id.
@@ -44,21 +36,14 @@ fn encode_function_types(encoder: &mut EncodedData, encode_types: impl FnOnce(&m
     let mut type_buf = Vec::new();
     encode_types(&mut type_buf);
 
-    TYPE_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if let Some(&id) = cache.get(&type_buf) {
+    crate::batch::BATCH_STATE.with(|state| {
+        let (id, is_cached) = state.borrow_mut().get_or_create_type_id(type_buf.clone());
+        if is_cached {
             // Cached - just send marker + ID
             encoder.push_u8(TYPE_CACHED);
             encoder.push_u32(id);
         } else {
             // First time - send full type def + ID
-            let id = NEXT_TYPE_ID.with(|n| {
-                let id = n.get();
-                n.set(id + 1);
-                id
-            });
-            cache.insert(type_buf.clone(), id);
-
             encoder.push_u8(TYPE_FULL);
             encoder.push_u32(id);
 

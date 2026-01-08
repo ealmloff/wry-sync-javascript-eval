@@ -14,7 +14,6 @@ use std::thread::ThreadId;
 use alloc::boxed::Box;
 use async_channel::{Receiver, Sender};
 use futures_util::{FutureExt, StreamExt};
-use once_cell::sync::OnceCell;
 use spin::RwLock;
 
 use slotmap::{DefaultKey, KeyData};
@@ -211,14 +210,19 @@ impl WryRuntime {
     }
 }
 
-static RUNTIME: OnceCell<WryRuntime> = OnceCell::new();
-static MAIN_THREAD_ID: OnceLock<ThreadId> = OnceLock::new();
+/// Combined global state for the runtime and main thread ID.
+struct GlobalRuntimeState {
+    runtime: WryRuntime,
+    main_thread_id: ThreadId,
+}
+
+static GLOBAL_RUNTIME: OnceLock<GlobalRuntimeState> = OnceLock::new();
 
 /// Check if the current thread is the main thread.
 fn is_main_thread() -> bool {
-    MAIN_THREAD_ID
+    GLOBAL_RUNTIME
         .get()
-        .map(|id| *id == std::thread::current().id())
+        .map(|state| state.main_thread_id == std::thread::current().id())
         .unwrap_or(false)
 }
 
@@ -243,13 +247,12 @@ pub fn start_app<F>(
 where
     F: core::future::Future<Output = ()> + 'static,
 {
-    // Record the main thread ID before doing anything else
-    MAIN_THREAD_ID
-        .set(std::thread::current().id())
-        .unwrap_or_else(|_| panic!("Main thread ID already set"));
-
     let event_loop_proxy = Box::new(event_loop_proxy) as Box<dyn Fn(AppEvent) + Send + Sync>;
-    if RUNTIME.set(WryRuntime::new(event_loop_proxy)).is_err() {
+    let state = GlobalRuntimeState {
+        runtime: WryRuntime::new(event_loop_proxy),
+        main_thread_id: std::thread::current().id(),
+    };
+    if GLOBAL_RUNTIME.set(state).is_err() {
         eprintln!("start_app can only be called once per process. Exiting.");
         return Err(AlreadyStartedError);
     }
@@ -332,7 +335,10 @@ where
 ///
 /// Panics if the runtime has not been initialized.
 pub(crate) fn get_runtime() -> &'static WryRuntime {
-    RUNTIME.get().expect("Event loop proxy not set")
+    &GLOBAL_RUNTIME
+        .get()
+        .expect("Event loop proxy not set")
+        .runtime
 }
 
 pub(crate) fn progress_js_with<O>(
