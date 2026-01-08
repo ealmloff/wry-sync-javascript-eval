@@ -22,9 +22,9 @@ use crate::runtime::{AppEvent, AppEventVariant, get_runtime};
 /// On Windows, custom URL schemes can cause hangs with WebView2,
 /// so we use http://wry.localhost/ instead.
 #[cfg(target_os = "windows")]
-pub const BASE_URL: &str = "http://wry.localhost/index";
+pub const BASE_URL: &str = "http://wry.index.html";
 #[cfg(not(target_os = "windows"))]
-pub const BASE_URL: &str = "wry://index";
+pub const BASE_URL: &str = "wry://index.html";
 
 /// Responder for wry-bindgen protocol requests.
 pub struct WryBindgenResponder {
