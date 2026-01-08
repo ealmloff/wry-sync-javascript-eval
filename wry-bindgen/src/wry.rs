@@ -20,13 +20,13 @@ use crate::runtime::{AppEvent, AppEventVariant, get_runtime};
 
 // Each platform has a different custom protocol scheme
 #[cfg(target_os = "android")]
-const BASE_URL: &str = "https://wry.index.html";
+pub const BASE_URL: &str = "https://wry.index.html";
 
 #[cfg(target_os = "windows")]
-const BASE_URL: &str = "http://wry.index.html";
+pub const BASE_URL: &str = "http://wry.index.html";
 
 #[cfg(not(any(target_os = "android", target_os = "windows")))]
-const BASE_URL: &str = "wry://index.html";
+pub const BASE_URL: &str = "wry://index.html";
 
 /// Responder for wry-bindgen protocol requests.
 pub struct WryBindgenResponder {
