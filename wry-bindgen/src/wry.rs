@@ -17,6 +17,16 @@ use crate::function_registry::FUNCTION_REGISTRY;
 use crate::ipc::{DecodedVariant, IPCMessage, MessageType, decode_data};
 use crate::runtime::{AppEvent, AppEventVariant, get_runtime};
 
+// Each platform has a different custom protocol scheme
+#[cfg(target_os = "android")]
+pub const BASE_URL: &str = "https://wry.index.html";
+
+#[cfg(target_os = "windows")]
+pub const BASE_URL: &str = "http://wry.index.html";
+
+#[cfg(not(any(target_os = "android", target_os = "windows")))]
+pub const BASE_URL: &str = "wry://index.html";
+
 /// Responder for wry-bindgen protocol requests.
 pub struct WryBindgenResponder {
     respond: Box<dyn FnOnce(Response<Vec<u8>>)>,
@@ -92,11 +102,14 @@ impl SharedWebviewState {
     fn respond_to_request(&mut self, response: IPCMessage) {
         if let Some(responder) = self.take_ongoing_request() {
             let body = response.into_data();
+            // Encode as base64 - sync XMLHttpRequest cannot use responseType="arraybuffer"
+            let engine = base64::engine::general_purpose::STANDARD;
+            let body_base64 = engine.encode(&body);
             responder.respond(
                 http::Response::builder()
                     .status(200)
-                    .header("Content-Type", "application/octet-stream")
-                    .body(body)
+                    .header("Content-Type", "text/plain")
+                    .body(body_base64.into_bytes())
                     .expect("Failed to build response"),
             );
         } else {
@@ -167,14 +180,13 @@ impl WryBindgen {
     /// Create a protocol handler closure suitable for `WebViewBuilder::with_asynchronous_custom_protocol`.
     ///
     /// The returned closure handles all "wry://" protocol requests:
-    /// - "wry://index" - serves root HTML (uses provided root_response)
-    /// - "wry://ready" - signals webview loaded
-    /// - "wry://snippets/{path}" - serves inline JS modules
-    /// - "wry://handler" - main IPC endpoint
+    /// - "/index" - serves root HTML (uses provided root_response)
+    /// - "/ready" - signals webview loaded
+    /// - "/snippets/{path}" - serves inline JS modules
+    /// - "/handler" - main IPC endpoint
     ///
     /// # Arguments
     /// * `proxy` - Function to send events to the event loop
-    /// * `root_response` - Function that returns the HTML response to serve at "wry://index"
     pub fn create_protocol_handler<F, R: Into<WryBindgenResponder>>(
         &self,
         proxy: F,
@@ -185,10 +197,15 @@ impl WryBindgen {
         let shared = self.shared.clone();
 
         move |request: &http::Request<Vec<u8>>, responder: R| {
-            let real_path = request.uri().to_string().replace("wry://", "");
-            let real_path = real_path.as_str().trim_matches('/');
+            let uri = request.uri().to_string();
+            let real_path = uri
+                .strip_prefix("wry://index.html")
+                .or_else(|| uri.strip_prefix("http://wry.index.html"))
+                .or_else(|| uri.strip_prefix("https://wry.index.html"))
+                .unwrap_or(&uri);
+            let real_path = real_path.trim_matches('/');
 
-            if real_path == "init" {
+            if real_path == "init.js" {
                 let responder = responder.into();
                 responder.respond(module_response(&Self::init_script()));
                 return None;
