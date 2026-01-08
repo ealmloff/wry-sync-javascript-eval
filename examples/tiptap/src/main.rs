@@ -2,7 +2,7 @@
 //!
 //! This example demonstrates how to create a rich text editor using TipTap
 //! with wry-bindgen bindings.
-//! 
+//!
 //! Adapted from https://github.com/lpotthast/leptos-tiptap
 
 use wasm_bindgen::prelude::*;
