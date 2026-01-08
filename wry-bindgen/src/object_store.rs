@@ -31,11 +31,7 @@ impl EncodeTypeDef for ObjectHandle {
     }
 }
 
-impl BatchableResult for ObjectHandle {
-    fn try_placeholder(_: &mut crate::batch::Runtime) -> Option<Self> {
-        None
-    }
-}
+impl BatchableResult for ObjectHandle {}
 
 pub fn with_object<T: 'static, R>(handle: ObjectHandle, f: impl FnOnce(&T) -> R) -> R {
     RUNTIME.with(|state| {

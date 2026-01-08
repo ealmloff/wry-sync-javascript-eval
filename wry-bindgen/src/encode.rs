@@ -46,7 +46,11 @@ pub trait BatchableResult: BinaryDecode {
     /// For opaque types (JsValue, Closure), this reserves a heap ID and returns a placeholder.
     /// For trivial types like (), this returns the known value.
     /// For value types (primitives, String, Vec, etc.), returns None to trigger a flush.
-    fn try_placeholder(batch: &mut Runtime) -> Option<Self>;
+    ///
+    /// Default implementation returns None (requires flush).
+    fn try_placeholder(_: &mut Runtime) -> Option<Self> {
+        None
+    }
 }
 
 /// Marker for cached type definition (type already sent, just reference by ID)
@@ -492,12 +496,7 @@ impl<T: BinaryEncode<P>, P> BinaryEncode<P> for Option<T> {
     }
 }
 
-impl<T: BinaryDecode> BatchableResult for Option<T> {
-    fn try_placeholder(_: &mut Runtime) -> Option<Self> {
-        // We need to read the response to know if it's Some or None
-        None
-    }
-}
+impl<T: BinaryDecode> BatchableResult for Option<T> {}
 
 impl<T: EncodeTypeDef, E: EncodeTypeDef> EncodeTypeDef for Result<T, E> {
     fn encode_type_def(buf: &mut Vec<u8>) {
@@ -519,12 +518,7 @@ impl<T: BinaryDecode, E: BinaryDecode> BinaryDecode for Result<T, E> {
     }
 }
 
-impl<T: BinaryDecode, E: BinaryDecode> BatchableResult for Result<T, E> {
-    fn try_placeholder(_: &mut Runtime) -> Option<Self> {
-        // We need to read the response to know if it's Ok or Err
-        None
-    }
-}
+impl<T: BinaryDecode, E: BinaryDecode> BatchableResult for Result<T, E> {}
 
 impl EncodeTypeDef for JsValue {
     fn encode_type_def(buf: &mut Vec<u8>) {
@@ -569,13 +563,7 @@ impl<F: ?Sized> BatchableResult for Closure<F> {
 /// Implement BatchableResult for value types that always need a flush to get the result.
 macro_rules! impl_value_type {
     ($($ty:ty),*) => {
-        $(
-            impl BatchableResult for $ty {
-                fn try_placeholder(_: &mut Runtime) -> Option<Self> {
-                    None
-                }
-            }
-        )*
+        $(impl BatchableResult for $ty {})*
     };
 }
 
@@ -1261,11 +1249,7 @@ impl<T: BinaryDecode> BinaryDecode for Vec<T> {
     }
 }
 
-impl<T: BinaryDecode> BatchableResult for Vec<T> {
-    fn try_placeholder(_: &mut Runtime) -> Option<Self> {
-        None
-    }
-}
+impl<T: BinaryDecode> BatchableResult for Vec<T> {}
 
 impl<T> BinaryEncode for &[T]
 where
@@ -1351,8 +1335,4 @@ impl BinaryDecode for Clamped<Vec<u8>> {
     }
 }
 
-impl BatchableResult for Clamped<Vec<u8>> {
-    fn try_placeholder(_: &mut Runtime) -> Option<Self> {
-        None
-    }
-}
+impl BatchableResult for Clamped<Vec<u8>> {}
