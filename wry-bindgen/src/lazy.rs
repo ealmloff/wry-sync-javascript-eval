@@ -24,7 +24,6 @@ use std::thread::LocalKey;
 /// let doc = WINDOW.document();
 /// ```
 pub struct JsThreadLocal<T: 'static> {
-    #[doc(hidden)]
     inner: &'static LocalKey<T>,
 }
 

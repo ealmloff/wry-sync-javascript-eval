@@ -17,19 +17,13 @@ use crate::function_registry::FUNCTION_REGISTRY;
 use crate::ipc::{DecodedVariant, IPCMessage, MessageType, decode_data};
 use crate::runtime::{AppEvent, AppEventVariant, get_runtime};
 
-// Each platform has a different custom protocol scheme
-#[cfg(target_os = "android")]
-pub const BASE_URL: &str = "https://wry.index.html";
-
-#[cfg(target_os = "windows")]
-pub const BASE_URL: &str = "http://wry.index.html";
-
-#[cfg(not(any(target_os = "android", target_os = "windows")))]
-pub const BASE_URL: &str = "wry://index.html";
+pub trait ImplWryBindgenResponder {
+    fn respond(self: Box<Self>, response: Response<Vec<u8>>);
+}
 
 /// Responder for wry-bindgen protocol requests.
 pub struct WryBindgenResponder {
-    respond: Box<dyn FnOnce(Response<Vec<u8>>)>,
+    respond: Box<dyn ImplWryBindgenResponder>,
 }
 
 impl<F> From<F> for WryBindgenResponder
@@ -37,15 +31,34 @@ where
     F: FnOnce(Response<Vec<u8>>) + 'static,
 {
     fn from(respond: F) -> Self {
+        struct FnOnceWrapper<F> {
+            f: F,
+        }
+
+        impl<F> ImplWryBindgenResponder for FnOnceWrapper<F>
+        where
+            F: FnOnce(Response<Vec<u8>>) + 'static,
+        {
+            fn respond(self: Box<Self>, response: Response<Vec<u8>>) {
+                (self.f)(response)
+            }
+        }
+
         Self {
-            respond: Box::new(respond),
+            respond: Box::new(FnOnceWrapper { f: respond }),
         }
     }
 }
 
 impl WryBindgenResponder {
+    pub fn new(f: impl ImplWryBindgenResponder + 'static) -> Self {
+        Self {
+            respond: Box::new(f),
+        }
+    }
+
     fn respond(self, response: Response<Vec<u8>>) {
-        (self.respond)(response);
+        self.respond.respond(response);
     }
 }
 
@@ -181,14 +194,15 @@ impl WryBindgen {
     ///
     /// The returned closure handles all "wry://" protocol requests:
     /// - "/index" - serves root HTML (uses provided root_response)
-    /// - "/ready" - signals webview loaded
-    /// - "/snippets/{path}" - serves inline JS modules
-    /// - "/handler" - main IPC endpoint
+    /// - "/__wbg__/initialized" - signals webview loaded
+    /// - "/__wbg__/snippets/{path}" - serves inline JS modules
+    /// - "/__wbg__/handler" - main IPC endpoint
     ///
     /// # Arguments
     /// * `proxy` - Function to send events to the event loop
     pub fn create_protocol_handler<F, R: Into<WryBindgenResponder>>(
         &self,
+        protocol: &str,
         proxy: F,
     ) -> impl Fn(&http::Request<Vec<u8>>, R) -> Option<R> + 'static
     where
@@ -196,30 +210,34 @@ impl WryBindgen {
     {
         let shared = self.shared.clone();
 
+        let protocol_prefix = format!("{protocol}://index.html");
+        let android_prefix = format!("https://{protocol}.index.html");
+        let windows_prefix = format!("http://{protocol}.index.html");
+
         move |request: &http::Request<Vec<u8>>, responder: R| {
             let uri = request.uri().to_string();
             let real_path = uri
-                .strip_prefix("wry://index.html")
-                .or_else(|| uri.strip_prefix("http://wry.index.html"))
-                .or_else(|| uri.strip_prefix("https://wry.index.html"))
+                .strip_prefix(&protocol_prefix)
+                .or_else(|| uri.strip_prefix(&windows_prefix))
+                .or_else(|| uri.strip_prefix(&android_prefix))
                 .unwrap_or(&uri);
             let real_path = real_path.trim_matches('/');
 
-            if real_path == "init.js" {
+            if real_path == "__wbg__/init.js" {
                 let responder = responder.into();
                 responder.respond(module_response(&Self::init_script()));
                 return None;
             }
 
-            if real_path == "ready" {
+            if real_path == "__wbg__/initialized" {
                 proxy(AppEvent::webview_loaded());
                 let responder = responder.into();
                 responder.respond(blank_response());
                 return None;
             }
 
-            // Serve inline_js modules from snippets/
-            if real_path.starts_with("snippets/") {
+            // Serve inline_js modules from __wbg__/snippets/
+            if real_path.starts_with("__wbg__/snippets/") {
                 let responder = responder.into();
                 if let Some(content) = FUNCTION_REGISTRY.get_module(real_path) {
                     responder.respond(module_response(content));
@@ -230,7 +248,7 @@ impl WryBindgen {
             }
 
             // Js sent us either an Evaluate or Respond message
-            if real_path == "handler" {
+            if real_path == "__wbg__/handler" {
                 let responder = responder.into();
                 let mut shared = shared.borrow_mut();
                 let Some(msg) = decode_request_data(request) else {
