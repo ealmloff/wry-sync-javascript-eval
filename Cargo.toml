@@ -43,6 +43,18 @@ name = "main_thread_benches"
 path = "benches/main.rs"
 harness = false
 
+[[example]]
+name = "canvas"
+path = "examples/web-sys/canvas.rs"
+
+[[example]]
+name = "dom"
+path = "examples/web-sys/dom.rs"
+
+[[example]]
+name = "paint"
+path = "examples/web-sys/paint.rs"
+
 [patch.crates-io]
 wasm-bindgen = { path = "shims/wasm-bindgen" }
 wasm-bindgen-futures = { path = "wasm-bindgen/crates/futures" }
