@@ -14,7 +14,7 @@ web-sys = { version = "0.3.83", path = "../../wasm-bindgen/crates/web-sys", feat
     "DomTokenList",
 ] }
 wry-testing = { version = "0.1.0", path = "../.." }
-wasm-bindgen = { path = "../../wry-bindgen" }
+wasm-bindgen = { version = "0.2" }
 leptos-tiptap-build = "0.2.8"
 
 [lints]

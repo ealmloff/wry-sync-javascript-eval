@@ -1,5 +1,4 @@
-use wasm_bindgen::Closure;
-use wasm_bindgen_macro::wasm_bindgen;
+use wasm_bindgen::{Closure, wasm_bindgen};
 
 #[wasm_bindgen(inline_js = r#"
 const originalLog = console.log;

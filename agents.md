@@ -1,5 +1,5 @@
 # Wry bindgen
-I am developing a replacement for wasm bindgen in the wry-bindgen folder. Status:
+This is a replacement for wasm bindgen in the wry-bindgen folder. Status:
 - [x] Minimal features in web-sys compiling with the new bindgen
 - [x] Web-sys compiling with --all-features
   - [x] Support for Clamped type

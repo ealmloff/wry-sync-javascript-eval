@@ -1,0 +1,22 @@
+[package]
+name = "wasm-bindgen"
+version = "0.2.105"
+edition = "2024"
+description = "Shim crate that re-exports either wry-bindgen-core (desktop) or wasm-bindgen (wasm32)"
+
+[features]
+default = ["std"]
+std = []
+enable-interning = []
+msrv = []
+
+# Desktop implementation
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+wry-bindgen = { path = "../../wry-bindgen" }
+
+# wasm32 implementation
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { git = "https://github.com/wasm-bindgen/wasm-bindgen" }
+
+[lints]
+workspace = true

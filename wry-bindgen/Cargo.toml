@@ -1,5 +1,5 @@
 [package]
-name = "wasm-bindgen"
+name = "wry-bindgen"
 version = "0.2.106"
 edition = "2024"
 

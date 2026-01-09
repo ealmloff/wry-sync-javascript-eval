@@ -6,14 +6,14 @@
 //! Adapted from https://github.com/lpotthast/leptos-tiptap
 
 use wasm_bindgen::prelude::*;
-use wasm_bindgen::{Closure, JsValue};
+use wasm_bindgen::{JsValue, closure::Closure};
 use web_sys::window;
 
 // Use the tiptap bundle from leptos-tiptap-build
 use leptos_tiptap_build::TIPTAP_BUNDLE_MIN_JS as TIPTAP_BUNDLE;
 
 // TipTap wrapper module - adapted from leptos-tiptap
-#[wasm_bindgen(crate = wasm_bindgen, inline_js = r#"
+#[wasm_bindgen(inline_js = r#"
 // Editor registry
 window._tiptapEditors = new Map();
 
@@ -349,7 +349,7 @@ pub struct SelectionState {
 impl SelectionState {
     /// Parse selection state from a JsValue
     pub fn from_js(value: &JsValue) -> Self {
-        #[wasm_bindgen(crate = wasm_bindgen, inline_js = r#"
+        #[wasm_bindgen(inline_js = r#"
 export function getBool(obj, key) {
     return obj && obj[key] === true;
 }
@@ -645,7 +645,7 @@ fn main() {
 }
 
 fn setup_toolbar_handlers() {
-    #[wasm_bindgen(crate = wasm_bindgen, inline_js = r#"
+    #[wasm_bindgen(inline_js = r#"
 export function setupToolbar(editorId) {
     const toolbar = document.getElementById('toolbar');
     if (!toolbar) return;
