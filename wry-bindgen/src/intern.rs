@@ -71,7 +71,7 @@ fn unintern_str(key: &str) {
 /// function, which simply returns its argument unchanged:
 ///
 /// ```rust
-/// # use wasm_bindgen::intern;
+/// # use wry_bindgen::intern;
 /// intern("foo") // returns "foo"
 /// # ;
 /// ```
