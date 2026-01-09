@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-web-sys = { version = "0.3.83", path = "../../wasm-bindgen/crates/web-sys", features = [
+web-sys = { version = "0.3.82", path = "../../wasm-bindgen/crates/web-sys", features = [
     "Document",
     "HtmlElement",
     "Element",
