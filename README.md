@@ -21,3 +21,11 @@ https://github.com/user-attachments/assets/0d56b30b-9791-44cb-9487-e406bb891ef4
 Yew's todoMVC example running unmodified from a native thread:
 
 https://github.com/user-attachments/assets/d13183a4-4d62-44ae-854e-11830126ca15
+
+Leafelet.js bindings:
+
+https://github.com/user-attachments/assets/a7f8e816-c8d5-486d-9746-875e324224b7
+
+Tiptap bindings:
+
+https://github.com/user-attachments/assets/4c6ef57d-5f89-4a3a-a8f3-1559ef415162
