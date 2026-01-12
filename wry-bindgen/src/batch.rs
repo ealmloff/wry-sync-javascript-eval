@@ -266,7 +266,7 @@ impl Runtime {
 
 thread_local! {
     /// Thread-local runtime state - always exists, reset after each flush
-    pub(crate) static RUNTIME: RefCell<Vec<Runtime>> = RefCell::new(Vec::new());
+    pub(crate) static RUNTIME: RefCell<Vec<Runtime>> = const { RefCell::new(Vec::new()) };
 }
 
 fn push_runtime(runtime: Runtime) {

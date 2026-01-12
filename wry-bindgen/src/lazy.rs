@@ -44,6 +44,6 @@ impl<T> JsThreadLocal<T> {
     where
         F: FnOnce(&T) -> R,
     {
-        self.inner.with(|val| f(&*val))
+        self.inner.with(|val| f(val))
     }
 }
