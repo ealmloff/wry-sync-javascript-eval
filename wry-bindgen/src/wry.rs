@@ -312,8 +312,6 @@ impl WryBindgen {
                 return Some(responder);
             };
 
-            println!("WryBindgen Protocol Request: {}", path_without_wbg);
-
             // Serve inline_js modules from __wbg__/snippets/
             if let Some(path_without_snippets) = path_without_wbg.strip_prefix("snippets/") {
                 let responder = responder.into();
@@ -336,8 +334,6 @@ impl WryBindgen {
                 return None;
             };
 
-            println!("WryBindgen Webview ID: {}", webview_id);
-
             if remaining_path == "init.js" {
                 let responder = responder.into();
                 responder.respond(module_response(&Self::init_script(webview_id)));
@@ -357,12 +353,10 @@ impl WryBindgen {
                 let mut webviews = webviews.borrow_mut();
                 let Some(webview_state) = webviews.get_mut(&webview_id) else {
                     responder.respond(error_response());
-                    eprintln!("WryBindgen: Received handler request for unknown webview ID: {}", webview_id);
                     return None;
                 };
                 let Some(msg) = decode_request_data(request) else {
                     responder.respond(error_response());
-                    println!("WryBindgen: Failed to decode IPC message from webview ID: {}", webview_id);
                     return None;
                 };
                 let msg_type = msg.ty().unwrap();
@@ -384,7 +378,6 @@ impl WryBindgen {
                         } else {
                             // Conversation is over
                             responder.respond(blank_response());
-                            eprintln!("WryBindgen: Completed IPC conversation with webview ID: {}", webview_id);
                         }
                     }
                 }
