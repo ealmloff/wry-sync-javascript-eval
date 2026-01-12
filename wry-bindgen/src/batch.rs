@@ -13,7 +13,6 @@ use crate::WryIPC;
 use crate::encode::{BatchableResult, BinaryDecode};
 use crate::ipc::DecodedData;
 use crate::ipc::{EncodedData, IPCMessage, MessageType};
-use crate::runtime::get_runtime;
 use crate::value::{JSIDX_OFFSET, JSIDX_RESERVED};
 
 /// State for batching operations and object storage.
@@ -258,6 +257,11 @@ impl Runtime {
     pub(crate) fn remove_object_untyped(&mut self, handle: u32) -> bool {
         self.objects.remove(&handle).is_some()
     }
+
+    /// Get a reference to the IPC layer.
+    pub(crate) fn ipc(&self) -> &WryIPC {
+        &self.ipc
+    }
 }
 
 thread_local! {
@@ -383,8 +387,7 @@ pub(crate) fn flush_and_then<R>(then: impl for<'a> Fn(DecodedData<'a>) -> R) -> 
     let batch_msg = with_runtime(|state| state.take_message());
 
     // Send and wait for result
-    let runtime = get_runtime();
-    (runtime.proxy)(AppEvent::ipc(batch_msg));
+    with_runtime(|runtime| (runtime.ipc().proxy)(AppEvent::ipc(batch_msg)));
     loop {
         if let Some(result) = crate::runtime::progress_js_with(&then) {
             return result;

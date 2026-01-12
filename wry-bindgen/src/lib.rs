@@ -479,7 +479,7 @@ pub use function_registry::{
 macro_rules! __wry_bindgen_thread_local {
     ($actual_ty:ty = $value:expr) => {{
         std::thread_local! {
-            pub static __INNER: $actual_ty = $value;
+            pub static __INNER: core::mem::ManuallyDrop<$actual_ty> = core::mem::ManuallyDrop::new($value);
         }
         $crate::prelude::JsThreadLocal::new(&__INNER)
     }};
