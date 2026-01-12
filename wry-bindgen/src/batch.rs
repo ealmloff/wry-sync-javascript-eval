@@ -6,13 +6,13 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::any::Any;
-use core::cell::{OnceCell, Ref, RefCell, RefMut};
+use core::cell::{Ref, RefCell, RefMut};
 use std::boxed::Box;
 
-use crate::WryIPC;
 use crate::encode::{BatchableResult, BinaryDecode};
 use crate::ipc::DecodedData;
 use crate::ipc::{EncodedData, IPCMessage, MessageType};
+use crate::runtime::WryIPC;
 use crate::value::{JSIDX_OFFSET, JSIDX_RESERVED};
 
 /// State for batching operations and object storage.
@@ -266,24 +266,35 @@ impl Runtime {
 
 thread_local! {
     /// Thread-local runtime state - always exists, reset after each flush
-    pub(crate) static RUNTIME: OnceCell<RefCell<Runtime>> = OnceCell::new();
+    pub(crate) static RUNTIME: RefCell<Vec<Runtime>> = RefCell::new(Vec::new());
 }
 
-pub(crate) fn init_runtime(ipc: WryIPC) {
+fn push_runtime(runtime: Runtime) {
+    RUNTIME.with(|state| {
+        state.borrow_mut().push(runtime);
+    });
+}
+
+fn pop_runtime() -> Runtime {
     RUNTIME.with(|state| {
         state
-            .set(RefCell::new(Runtime::new(ipc)))
-            .unwrap_or_else(|_| panic!("Runtime already initialized"));
-    });
+            .borrow_mut()
+            .pop()
+            .expect("No runtime available to pop")
+    })
+}
+
+pub(crate) fn in_runtime<O>(runtime: Runtime, run: impl FnOnce() -> O) -> (Runtime, O) {
+    push_runtime(runtime);
+    let out = run();
+    let runtime = pop_runtime();
+    (runtime, out)
 }
 
 pub(crate) fn with_runtime<R>(f: impl FnOnce(&mut Runtime) -> R) -> R {
     RUNTIME.with(|state| {
-        let mut state = state
-            .get()
-            .expect("runtime must be initialized")
-            .borrow_mut();
-        f(&mut state)
+        let mut state = state.borrow_mut();
+        f(state.last_mut().expect("No runtime available"))
     })
 }
 

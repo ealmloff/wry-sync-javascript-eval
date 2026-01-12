@@ -107,14 +107,15 @@ where
         }
     };
 
-    let wry_bindgen = start_app(event_loop_proxy, app, |future| {
+    let (wry_bindgen, run_app) = start_app(event_loop_proxy, app);
+
+    std::thread::spawn(move || {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap()
-            .block_on(future);
-    })
-    .unwrap();
+            .block_on(run_app());
+    });
 
     run_event_loop(event_loop, wry_bindgen, headless);
 

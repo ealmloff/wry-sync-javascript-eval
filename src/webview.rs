@@ -74,13 +74,11 @@ pub(crate) fn run_event_loop(
                 std::process::exit(0);
             }
             Event::UserEvent(app_event) => {
-                if let Some(status) = wry_bindgen.handle_user_event(app_event, |script| {
+                wry_bindgen.handle_user_event(app_event, |script| {
                     if let Err(err) = webview.evaluate_script(script) {
                         eprintln!("Error evaluating script: {err}");
                     }
-                }) {
-                    std::process::exit(status);
-                }
+                });
             }
             _ => {}
         }

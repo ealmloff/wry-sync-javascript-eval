@@ -287,13 +287,8 @@ impl WryBindgen {
     /// # Arguments
     /// * `event` - The AppEvent to handle
     /// * `webview` - Reference to the webview for script evaluation
-    pub fn handle_user_event(
-        &self,
-        event: AppEvent,
-        mut evaluate_script: impl FnMut(&str),
-    ) -> Option<i32> {
+    pub fn handle_user_event(&self, event: AppEvent, mut evaluate_script: impl FnMut(&str)) {
         match event.into_variant() {
-            AppEventVariant::Shutdown(status) => return Some(status),
             AppEventVariant::RunOnMainThread(task) => {
                 task.execute();
             }
@@ -311,8 +306,6 @@ impl WryBindgen {
                 }
             }
         }
-
-        None
     }
 
     fn handle_ipc_message(&self, ipc_msg: IPCMessage, evaluate_script: impl FnOnce(&str)) {

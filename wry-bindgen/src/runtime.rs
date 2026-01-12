@@ -6,7 +6,8 @@
 use core::any::Any;
 use core::error::Error;
 use core::fmt::Display;
-use core::pin::Pin;
+use core::future::poll_fn;
+use core::pin::{Pin, pin};
 use std::sync::mpsc;
 use std::thread::ThreadId;
 
@@ -16,7 +17,7 @@ use futures_util::{FutureExt, StreamExt};
 use spin::RwLock;
 
 use crate::BinaryDecode;
-use crate::batch::{init_runtime, with_runtime};
+use crate::batch::{Runtime, in_runtime, with_runtime};
 use crate::function::{CALL_EXPORT_FN_ID, DROP_NATIVE_REF_FN_ID, RustCallback};
 use crate::ipc::MessageType;
 use crate::ipc::{DecodedData, DecodedVariant, IPCMessage};
@@ -83,13 +84,6 @@ impl AppEvent {
         }
     }
 
-    /// Create a new shutdown event with the given status code.
-    pub(crate) fn shutdown(status: i32) -> Self {
-        Self {
-            event: AppEventVariant::Shutdown(status),
-        }
-    }
-
     /// Create a new run-on-main-thread event.
     fn run_on_main_thread(task: MainThreadTask) -> Self {
         Self {
@@ -109,8 +103,6 @@ pub(crate) enum AppEventVariant {
     Ipc(IPCMessage),
     /// The webview has finished loading
     WebviewLoaded,
-    /// Request to shut down the application with a status code
-    Shutdown(i32),
     /// Execute a closure on the main thread
     RunOnMainThread(MainThreadTask),
 }
@@ -168,7 +160,7 @@ impl IPCReceivers {
 ///
 /// This struct holds the event loop proxy for sending messages to the
 /// WebView and manages queued Rust calls.
-pub struct WryIPC {
+pub(crate) struct WryIPC {
     pub proxy: Box<dyn Fn(AppEvent) + Send + Sync>,
     receivers: RwLock<IPCReceivers>,
     main_thread_id: ThreadId,
@@ -202,11 +194,6 @@ impl WryIPC {
     pub(crate) fn js_response(&self, responder: IPCMessage) {
         (self.proxy)(AppEvent::ipc(responder));
     }
-
-    /// Request the application to shut down with a status code.
-    pub fn shutdown(&self, status: i32) {
-        (self.proxy)(AppEvent::shutdown(status));
-    }
 }
 
 /// Check if the current thread is the main thread.
@@ -230,60 +217,44 @@ impl Error for AlreadyStartedError {}
 pub fn start_app<F>(
     event_loop_proxy: impl Fn(AppEvent) + Send + Sync + 'static,
     app: impl FnOnce() -> F + Send + 'static,
-    start_async_runtime: impl FnOnce(Pin<Box<dyn Future<Output = ()>>>) + Send + 'static,
-) -> Result<WryBindgen, AlreadyStartedError>
+) -> (
+    WryBindgen,
+    impl FnOnce() -> Pin<Box<dyn Future<Output = ()> + 'static>> + Send + 'static,
+)
 where
     F: core::future::Future<Output = ()> + 'static,
 {
     let event_loop_proxy = Box::new(event_loop_proxy) as Box<dyn Fn(AppEvent) + Send + Sync>;
     let (ipc, sender) = WryIPC::new(event_loop_proxy, std::thread::current().id());
     // Spawn the app thread with panic handling - if the app panics, shut down the webview
-    std::thread::spawn(move || {
-        init_runtime(ipc);
-        struct ShutdownOnDrop(i32);
-        impl Drop for ShutdownOnDrop {
-            fn drop(&mut self) {
-                shutdown(self.0);
-            }
-        }
-        let mut shutdown = ShutdownOnDrop(1);
-
-        let run = || {
+    let start_future = move || {
+        let run_app_in_runtime = async move {
             let run_app = app();
             let wait_for_events = handle_callbacks();
 
-            start_async_runtime(Box::pin(async move {
-                futures_util::select! {
-                    _ = run_app.fuse() => {},
-                    _ = wait_for_events.fuse() => {},
-                }
-            }));
-        };
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run));
-        let status = if let Err(panic_info) = result {
-            eprintln!("App thread panicked, shutting down webview");
-            // Try to print panic info
-            if let Some(s) = panic_info.downcast_ref::<&str>() {
-                eprintln!("Panic message: {s}");
-            } else if let Some(s) = panic_info.downcast_ref::<alloc::string::String>() {
-                eprintln!("Panic message: {s}");
+            futures_util::select! {
+                _ = run_app.fuse() => {},
+                _ = wait_for_events.fuse() => {},
             }
-            1 // Exit with error status on panic
-        } else {
-            0 // Exit with success status on normal completion
         };
-        shutdown.0 = status;
-    });
 
-    Ok(WryBindgen::new(sender))
-}
+        let runtime = Runtime::new(ipc);
+        let mut maybe_runtime = Some(runtime);
+        let poll_in_runtime = async move {
+            let mut run_app_in_runtime = pin!(run_app_in_runtime);
+            poll_fn(move |ctx| {
+                let (new_runtime, poll_result) = in_runtime(maybe_runtime.take().unwrap(), || {
+                    run_app_in_runtime.as_mut().poll(ctx)
+                });
+                maybe_runtime = Some(new_runtime);
+                poll_result
+            }).await
+        };
 
-/// Request the application to shut down with a status code.
-///
-/// This sends a shutdown event through the event loop, which will cause
-/// the webview to close and the application to exit with the given status code.
-pub(crate) fn shutdown(status: i32) {
-    with_runtime(|runtime| runtime.ipc().shutdown(status));
+        Box::pin(poll_in_runtime) as Pin<Box<dyn Future<Output = ()> + 'static>>
+    };
+
+    (WryBindgen::new(sender), start_future)
 }
 
 /// Execute a closure on the main thread (winit event loop thread) and block until it completes,
