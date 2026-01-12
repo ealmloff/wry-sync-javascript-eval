@@ -36,6 +36,7 @@ pub(crate) fn run_event_loop(
     event_loop: EventLoop<WryEvent>,
     wry_bindgen: WryBindgen,
     headless: bool,
+    webview_id: u64,
 ) {
     let window = WindowBuilder::new()
         .with_inner_size(LogicalSize::new(800, 800))
@@ -56,7 +57,7 @@ pub(crate) fn run_event_loop(
                 return;
             };
 
-            responder(root_response())
+            responder(root_response(webview_id))
         })
         .with_url(BASE_URL);
 

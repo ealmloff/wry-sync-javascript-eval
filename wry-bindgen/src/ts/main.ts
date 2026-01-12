@@ -15,5 +15,7 @@ declare global {
     evaluate_from_rust_binary: (dataBase64: string) => unknown;
     jsHeap: JSHeap;
     rustExports: typeof rustExports;
+    // This is set by wry-bindgen when initializing the webview
+    webview_id: number;
   }
 }

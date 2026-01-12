@@ -1,13 +1,13 @@
-pub fn root_response() -> wry::http::Response<Vec<u8>> {
-    let html = r#"<!DOCTYPE html>
+pub fn root_response(webview_id: u64) -> wry::http::Response<Vec<u8>> {
+    let html = format!(r#"<!DOCTYPE html>
 <html>
 <head>
     <title>Wry Test</title>
-    <script src="/__wbg__/init.js"></script>
+    <script src="/__wbg__/{webview_id}/init.js"></script>
 </head>
 <body>
 </body>
-</html>"#;
+</html>"#);
 
     wry::http::Response::builder()
         .header("Content-Type", "text/html")
