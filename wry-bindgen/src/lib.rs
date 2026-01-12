@@ -28,6 +28,7 @@ mod intern;
 pub(crate) mod ipc;
 mod js_helpers;
 mod lazy;
+#[doc(hidden)]
 pub mod object_store;
 pub mod runtime;
 mod value;

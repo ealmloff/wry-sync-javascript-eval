@@ -105,10 +105,11 @@ pub(crate) enum AppEventVariant {
     WebviewLoaded,
     /// Execute a closure on the main thread
     RunOnMainThread(MainThreadTask),
+
 }
 
 #[derive(Clone)]
-pub struct IPCSenders {
+pub(crate) struct IPCSenders {
     eval_sender: Sender<IPCMessage>,
     respond_sender: futures_channel::mpsc::UnboundedSender<IPCMessage>,
 }
@@ -225,7 +226,8 @@ where
     F: core::future::Future<Output = ()> + 'static,
 {
     let event_loop_proxy = Box::new(event_loop_proxy) as Box<dyn Fn(AppEvent) + Send + Sync>;
-    let (ipc, sender) = WryIPC::new(event_loop_proxy, std::thread::current().id());
+    let (ipc, senders) = WryIPC::new(event_loop_proxy, std::thread::current().id());
+    let bindgen = WryBindgen::new(senders);
     // Spawn the app thread with panic handling - if the app panics, shut down the webview
     let start_future = move || {
         let run_app_in_runtime = async move {
@@ -254,7 +256,7 @@ where
         Box::pin(poll_in_runtime) as Pin<Box<dyn Future<Output = ()> + 'static>>
     };
 
-    (WryBindgen::new(sender), start_future)
+    (bindgen, start_future)
 }
 
 /// Execute a closure on the main thread (winit event loop thread) and block until it completes,

@@ -168,7 +168,7 @@ impl WryBindgen {
     ///
     /// # Arguments
     /// * `function_registry` - Reference to the collected JS function specifications
-    pub fn new(sender: IPCSenders) -> Self {
+    pub(crate) fn new(sender: IPCSenders) -> Self {
         Self {
             shared: Rc::new(RefCell::new(SharedWebviewState::default())),
             state: RefCell::new(WebviewLoadingState::default()),

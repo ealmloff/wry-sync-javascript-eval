@@ -11,7 +11,7 @@ pub mod bindings;
 mod home;
 mod webview;
 
-use webview::run_event_loop;
+use webview::{run_event_loop, WryEvent};
 
 // Re-export bindings for convenience
 pub use bindings::set_on_log;
@@ -97,13 +97,13 @@ where
         app().await
     };
 
-    let event_loop = EventLoopBuilder::with_user_event().build();
+    let event_loop = EventLoopBuilder::<WryEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
 
     let event_loop_proxy = {
         let proxy = proxy.clone();
         move |event| {
-            _ = proxy.send_event(event);
+            _ = proxy.send_event(WryEvent::App(event));
         }
     };
 
@@ -115,6 +115,8 @@ where
             .build()
             .unwrap()
             .block_on(run_app());
+        // Signal the event loop to exit after app completes
+        let _ = proxy.send_event(WryEvent::Shutdown);
     });
 
     run_event_loop(event_loop, wry_bindgen, headless);
