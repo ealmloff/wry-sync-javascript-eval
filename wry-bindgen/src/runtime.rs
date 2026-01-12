@@ -17,7 +17,7 @@ use futures_util::{FutureExt, StreamExt};
 use spin::RwLock;
 
 use crate::BinaryDecode;
-use crate::batch::RUNTIME;
+use crate::batch::with_runtime;
 use crate::function::{CALL_EXPORT_FN_ID, DROP_NATIVE_REF_FN_ID, RustCallback};
 use crate::ipc::MessageType;
 use crate::ipc::{DecodedData, DecodedVariant, IPCMessage};
@@ -168,13 +168,13 @@ impl IPCReceivers {
 ///
 /// This struct holds the event loop proxy for sending messages to the
 /// WebView and manages queued Rust calls.
-pub struct WryRuntime {
+pub struct WryIPC {
     pub proxy: Box<dyn Fn(AppEvent) + Send + Sync>,
     pub(crate) senders: IPCSenders,
     receivers: RwLock<IPCReceivers>,
 }
 
-impl WryRuntime {
+impl WryIPC {
     /// Create a new runtime with the given event loop proxy.
     pub(crate) fn new(proxy: Box<dyn Fn(AppEvent) + Send + Sync>) -> Self {
         let (eval_sender, eval_receiver) = async_channel::unbounded();
@@ -212,7 +212,7 @@ impl WryRuntime {
 
 /// Combined global state for the runtime and main thread ID.
 struct GlobalRuntimeState {
-    runtime: WryRuntime,
+    runtime: WryIPC,
     main_thread_id: ThreadId,
 }
 
@@ -249,7 +249,7 @@ where
 {
     let event_loop_proxy = Box::new(event_loop_proxy) as Box<dyn Fn(AppEvent) + Send + Sync>;
     let state = GlobalRuntimeState {
-        runtime: WryRuntime::new(event_loop_proxy),
+        runtime: WryIPC::new(event_loop_proxy),
         main_thread_id: std::thread::current().id(),
     };
     if GLOBAL_RUNTIME.set(state).is_err() {
@@ -342,7 +342,7 @@ where
 /// Get the runtime environment.
 ///
 /// Panics if the runtime has not been initialized.
-pub(crate) fn get_runtime() -> &'static WryRuntime {
+pub(crate) fn get_runtime() -> &'static WryIPC {
     &GLOBAL_RUNTIME
         .get()
         .expect("Event loop proxy not set")
@@ -382,7 +382,7 @@ pub async fn poll_callbacks() {
 }
 
 /// Handle a Rust callback invocation from JavaScript.
-fn handle_rust_callback(runtime: &WryRuntime, data: &mut DecodedData) {
+fn handle_rust_callback(runtime: &WryIPC, data: &mut DecodedData) {
     let fn_id = data.take_u32().expect("Failed to read fn_id");
     match fn_id {
         // Call a registered Rust callback
@@ -391,15 +391,14 @@ fn handle_rust_callback(runtime: &WryRuntime, data: &mut DecodedData) {
 
             // Clone the Rc while briefly borrowing the batch state, then release the borrow.
             // This allows nested callbacks to access the object store during our callback execution.
-            let callback = RUNTIME.with(|state| {
-                let state = state.borrow();
+            let callback = with_runtime(|state| {
                 let rust_callback = state.get_object::<RustCallback>(key);
 
                 rust_callback.clone_rc()
             });
 
             // Push a borrow frame before calling the callback - nested calls won't clear our borrowed refs
-            crate::batch::RUNTIME.with(|state| state.borrow_mut().push_borrow_frame());
+            with_runtime(|state| state.push_borrow_frame());
 
             // Call through the cloned Rc (uniform Fn interface)
             let response = IPCMessage::new_respond(|encoder| {
@@ -407,7 +406,7 @@ fn handle_rust_callback(runtime: &WryRuntime, data: &mut DecodedData) {
             });
 
             // Pop the borrow frame after the callback completes
-            crate::batch::RUNTIME.with(|state| state.borrow_mut().pop_borrow_frame());
+            with_runtime(|state| state.pop_borrow_frame());
 
             // Send response to JS
             runtime.js_response(response);

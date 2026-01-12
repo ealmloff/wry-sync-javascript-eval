@@ -451,7 +451,7 @@ pub use batch::batch;
 pub use encode::{BatchableResult, BinaryDecode, BinaryEncode, EncodeTypeDef};
 pub use function::JSFunction;
 pub use ipc::{DecodeError, DecodedData, EncodedData};
-pub use runtime::{WryRuntime, run_on_main_thread, start_app};
+pub use runtime::{WryIPC, run_on_main_thread, start_app};
 
 // Re-export the macros
 pub use wry_bindgen_macro::link_to;
