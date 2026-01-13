@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "wry-bindgen", "wry-bindgen-macro", "wry-bindgen-macro-support", "wasm-bindgen/crates/web-sys", "wasm-bindgen/crates/js-sys", "wasm-bindgen/crates/futures", "examples/gloo", "examples/dioxus-web", "examples/yew", "examples/piet", "examples/tiptap",  "examples/openstreetmap"]
+members = [".", "wry-bindgen", "wry-bindgen-macro", "wry-bindgen-macro-support", "shims/wasm-bindgen-macro", "wasm-bindgen/crates/web-sys", "wasm-bindgen/crates/js-sys", "wasm-bindgen/crates/futures", "examples/gloo", "examples/dioxus-web", "examples/yew", "examples/piet", "examples/tiptap",  "examples/openstreetmap"]
 exclude = ["wasm-bindgen"]
 resolver = "2"
 

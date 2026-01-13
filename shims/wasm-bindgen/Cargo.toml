@@ -10,6 +10,9 @@ std = []
 enable-interning = []
 msrv = []
 
+[dependencies]
+wasm-bindgen-macro = { path = "../wasm-bindgen-macro" }
+
 # Desktop implementation
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wry-bindgen = { path = "../../wry-bindgen" }

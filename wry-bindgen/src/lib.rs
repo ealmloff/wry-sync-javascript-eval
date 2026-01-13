@@ -47,7 +47,7 @@ pub mod closure {
 /// This module provides the wbg_cast function used for type casting.
 pub mod __rt {
     use crate::{
-        __wry_submit_js_function, LazyJsFunction,
+        __wry_submit_js_function, JsValue, LazyJsFunction,
         encode::{BatchableResult, BinaryEncode, EncodeTypeDef},
     };
 
@@ -64,6 +64,22 @@ pub mod __rt {
     {
         let func: LazyJsFunction<fn(From) -> To> = __wry_submit_js_function!("(a0) => a0");
         func.call(value)
+    }
+
+    /// Convert a panic value into a JsValue error.
+    ///
+    /// This is used by wasm-bindgen-futures to convert Rust panics into JS errors.
+    #[cfg(feature = "std")]
+    pub fn panic_to_panic_error(val: std::boxed::Box<dyn std::any::Any + Send>) -> JsValue {
+        let maybe_panic_msg: Option<&str> = if let Some(s) = val.downcast_ref::<&str>() {
+            Some(s)
+        } else if let Some(s) = val.downcast_ref::<std::string::String>() {
+            Some(s)
+        } else {
+            None
+        };
+        // Create an Error object with the panic message
+        JsValue::from_str(maybe_panic_msg.unwrap_or("Rust panic"))
     }
 }
 
