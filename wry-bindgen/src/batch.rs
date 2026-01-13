@@ -285,8 +285,8 @@ impl Runtime {
     }
 
     /// Remove an exported object without returning it.
-    pub(crate) fn remove_object_untyped(&mut self, handle: u32) -> bool {
-        self.objects.remove(&handle).is_some()
+    pub(crate) fn remove_object_untyped(&mut self, handle: u32) -> Option<Box<dyn Any>> {
+        self.objects.remove(&handle)
     }
 
     /// Get a reference to the IPC layer.
