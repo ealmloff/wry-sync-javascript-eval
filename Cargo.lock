@@ -2493,7 +2493,7 @@ checksum = "8eaf4bc02d17cbdd7ff4c7438cafcdf7fb9a4613313ad11b4f8fefe7d3fa0130"
 
 [[package]]
 name = "js-sys"
-version = "0.3.82"
+version = "0.3.83"
 dependencies = [
  "once_cell",
  "wasm-bindgen 0.2.106",
@@ -5050,7 +5050,7 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-futures"
-version = "0.4.55"
+version = "0.4.56"
 dependencies = [
  "cfg-if",
  "futures-core",
@@ -5115,7 +5115,7 @@ dependencies = [
 
 [[package]]
 name = "web-sys"
-version = "0.3.82"
+version = "0.3.83"
 dependencies = [
  "js-sys",
  "wasm-bindgen 0.2.106",
