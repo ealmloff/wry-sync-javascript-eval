@@ -27,7 +27,6 @@ use core::{mem::ManuallyDrop, panic::Location};
 pub struct JsThreadLocal<T: 'static> {
     key: ThreadLocalKey<'static>,
     init: fn() -> T,
-    phantom: core::marker::PhantomData<T>,
 }
 
 impl<T> JsThreadLocal<T> {
@@ -44,7 +43,6 @@ impl<T> JsThreadLocal<T> {
                 index,
             },
             init,
-            phantom: core::marker::PhantomData,
         }
     }
 
