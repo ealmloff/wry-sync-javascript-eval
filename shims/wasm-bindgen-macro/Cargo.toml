@@ -1,6 +1,6 @@
 [package]
 name = "wasm-bindgen-macro"
-version = "0.2.105"
+version = "0.2.106"
 edition = "2024"
 description = "Shim macro that expands to both wasm-bindgen and wry-bindgen implementations"
 
