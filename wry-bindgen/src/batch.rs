@@ -347,6 +347,12 @@ pub(crate) fn queue_js_drop(id: u64) {
         "Attempted to drop reserved JS heap ID {id}"
     );
 
+    let runtime_already_dropped = RUNTIME.with(|state| state.borrow().is_empty());
+    // If the runtime has already been dropped, we don't need to drop the JS reference
+    if runtime_already_dropped {
+        return;
+    }
+
     let id = with_runtime(|state| state.release_heap_id(id));
     if let Some(id) = id {
         crate::js_helpers::js_drop_heap_ref(id);
