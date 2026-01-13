@@ -470,21 +470,6 @@ pub use function_registry::{
     LazyJsFunction,
 };
 
-/// Macro to create a thread-local JavaScript value accessor.
-///
-/// This macro is used by the `#[wasm_bindgen(thread_local_v2)]` attribute
-/// to generate lazy static accessors for JavaScript global values.
-#[macro_export]
-#[doc(hidden)]
-macro_rules! __wry_bindgen_thread_local {
-    ($actual_ty:ty = $value:expr) => {{
-        std::thread_local! {
-            pub static __INNER: core::mem::ManuallyDrop<$actual_ty> = core::mem::ManuallyDrop::new($value);
-        }
-        $crate::prelude::JsThreadLocal::new(&__INNER)
-    }};
-}
-
 /// Macro to register and call a JavaScript function.
 ///
 /// This macro encapsulates the common pattern of:

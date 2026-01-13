@@ -3,9 +3,8 @@
 //! This module handles the connection between the Rust runtime and the
 //! JavaScript environment via winit's event loop.
 
-use core::any::Any;
 use core::pin::Pin;
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
 
 use alloc::boxed::Box;
 use async_channel::{Receiver, Sender};
@@ -19,41 +18,6 @@ use crate::ipc::MessageType;
 use crate::ipc::{DecodedData, DecodedVariant, IPCMessage};
 use crate::object_store::ObjectHandle;
 use crate::object_store::remove_object;
-
-/// A task to be executed on the main thread with completion signaling and return value.
-pub struct MainThreadTask {
-    task: Box<dyn FnOnce() -> Box<dyn Any + Send + 'static> + Send + 'static>,
-    completion: Option<mpsc::SyncSender<Box<dyn Any + Send + 'static>>>,
-}
-
-impl MainThreadTask {
-    /// Create a new main thread task.
-    pub fn new(
-        task: Box<dyn FnOnce() -> Box<dyn Any + Send + 'static> + Send + 'static>,
-        completion: mpsc::SyncSender<Box<dyn Any + Send + 'static>>,
-    ) -> Self {
-        Self {
-            task,
-            completion: Some(completion),
-        }
-    }
-
-    /// Execute the task and signal completion with the return value.
-    pub fn execute(mut self) {
-        let result = (self.task)();
-        if let Some(sender) = self.completion.take() {
-            let _ = sender.send(result);
-        }
-    }
-}
-
-impl std::fmt::Debug for MainThreadTask {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MainThreadTask")
-            .field("task", &"<closure>")
-            .finish()
-    }
-}
 
 /// Application-level events that can be sent through the event loop.
 ///

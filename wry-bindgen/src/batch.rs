@@ -12,6 +12,7 @@ use std::boxed::Box;
 use crate::encode::{BatchableResult, BinaryDecode};
 use crate::ipc::DecodedData;
 use crate::ipc::{EncodedData, IPCMessage, MessageType};
+use crate::lazy::ThreadLocalKey;
 use crate::runtime::WryIPC;
 use crate::value::{JSIDX_OFFSET, JSIDX_RESERVED};
 
@@ -52,6 +53,8 @@ pub struct Runtime {
     ipc: WryIPC,
     /// The id of the webview this is associated with
     webview_id: u64,
+    /// Thread locals associated with the runtime
+    thread_locals: BTreeMap<ThreadLocalKey<'static>, Box<dyn Any>>,
 }
 
 impl Runtime {
@@ -79,6 +82,7 @@ impl Runtime {
             next_object_handle: 0,
             ipc,
             webview_id,
+            thread_locals: BTreeMap::new(),
         }
     }
 
@@ -233,6 +237,30 @@ impl Runtime {
         self.next_object_handle = self.next_object_handle.wrapping_add(1);
         self.objects.insert(handle, Box::new(RefCell::new(obj)));
         handle
+    }
+
+    /// Get a thread-local variable.
+    pub(crate) fn take_thread_local<T: 'static>(&mut self, key: ThreadLocalKey<'static>) -> T {
+        *self
+            .thread_locals
+            .remove(&key)
+            .expect("thread local not found")
+            .downcast::<T>()
+            .expect("type mismatch")
+    }
+
+    /// Insert a thread-local variable.
+    pub(crate) fn insert_thread_local<T: 'static>(
+        &mut self,
+        key: ThreadLocalKey<'static>,
+        value: T,
+    ) {
+        self.thread_locals.insert(key, Box::new(value));
+    }
+
+    /// Check if a thread-local variable exists.
+    pub(crate) fn has_thread_local(&self, key: ThreadLocalKey<'static>) -> bool {
+        self.thread_locals.contains_key(&key)
     }
 
     /// Get a reference to an exported object.

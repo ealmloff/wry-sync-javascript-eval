@@ -3,7 +3,10 @@
 //! This module generates Rust code that uses the wry-bindgen runtime
 //! and inventory-based function registration.
 
-use std::hash::{BuildHasher, RandomState};
+use std::{
+    hash::{BuildHasher, RandomState},
+    sync::atomic::AtomicU32,
+};
 
 use crate::ast::{
     ExportMethod, ExportMethodKind, ExportStruct, ImportFunction, ImportFunctionKind, ImportStatic,
@@ -854,6 +857,11 @@ fn generate_static(
     krate: &TokenStream,
     prefix: &str,
 ) -> syn::Result<TokenStream> {
+    fn next_thread_local_id() -> u32 {
+        static THREAD_LOCAL_ID: AtomicU32 = AtomicU32::new(0);
+        THREAD_LOCAL_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    }
+
     let vis = &st.vis;
     let rust_name = &st.rust_name;
     let ty = &st.ty;
@@ -863,6 +871,7 @@ fn generate_static(
     let js_code = generate_static_js_code(st, prefix);
 
     assert!(st.thread_local_v2);
+    let id = next_thread_local_id();
 
     // Generate a lazily-initialized thread-local static
     // Type information is now passed at call time via JSFunction::call
@@ -873,7 +882,7 @@ fn generate_static(
             fn __init_wbg() -> #ty {
                 #krate::__wry_call_js_function!(#js_code, fn() -> #ty, ())
             }
-            #krate::__wry_bindgen_thread_local!(#ty = __init_wbg())
+            #krate::JsThreadLocal::new(__init_wbg, #id)
         };
     })
 }
