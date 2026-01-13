@@ -59,7 +59,7 @@ impl std::fmt::Debug for MainThreadTask {
 ///
 /// This enum wraps both IPC messages from JavaScript and control messages
 /// from the application (like shutdown requests).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WryBindgenEvent {
     id: u64,
     event: AppEventVariant,
@@ -93,7 +93,7 @@ impl WryBindgenEvent {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum AppEventVariant {
     /// An IPC message from JavaScript
     Ipc(IPCMessage),

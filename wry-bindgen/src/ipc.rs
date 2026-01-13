@@ -114,7 +114,7 @@ pub(crate) enum MessageType {
 /// - u8: message type (1)
 /// - For each operation result:
 ///   - encoded return value (varies by function)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct IPCMessage {
     data: Vec<u8>,
 }
