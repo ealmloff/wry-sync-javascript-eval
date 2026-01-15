@@ -1,9 +1,9 @@
-//! Example application using wry-testing library
+//! Example application using wry-launch library
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{Document, HtmlElement};
-use wry_testing::run;
+use wry_launch::run;
 
 fn main() -> wry::Result<()> {
     run(|| async {

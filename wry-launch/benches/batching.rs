@@ -1,5 +1,5 @@
 use wasm_bindgen::wasm_bindgen;
-use wry_testing::{self, JsValue};
+use wry_launch::{self, JsValue};
 
 #[wasm_bindgen(inline_js = "export function add(a, b) { return a + b; }")]
 extern "C" {
@@ -13,7 +13,7 @@ pub fn bench_batch_add_1() {
 
 pub fn bench_batch_add_100() {
     let _results =
-        wry_testing::batch(|| (0..100).map(|_| add_numbers(10, 15)).collect::<Vec<u32>>());
+        wry_launch::batch(|| (0..100).map(|_| add_numbers(10, 15)).collect::<Vec<u32>>());
 }
 
 #[wasm_bindgen(inline_js = "export function create_element(tag) {
@@ -29,7 +29,7 @@ pub fn bench_batch_create_element_1() {
 }
 
 pub fn bench_batch_create_element_100() {
-    let _results = wry_testing::batch(|| {
+    let _results = wry_launch::batch(|| {
         let tag = "div".to_string();
         (0..100).map(|_| create_element(&tag)).collect::<Vec<_>>()
     });

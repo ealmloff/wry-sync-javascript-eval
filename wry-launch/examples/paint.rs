@@ -4,7 +4,7 @@ use core::f64;
 use std::cell::Cell;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
-use wry_testing::run;
+use wry_launch::run;
 
 fn main() -> wry::Result<()> {
     run(|| async {

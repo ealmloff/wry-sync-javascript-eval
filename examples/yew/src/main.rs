@@ -1,4 +1,4 @@
-// https://github.com/yewstack/yew/blob/master/examples/todomvc adapted for wry-testing
+// https://github.com/yewstack/yew/blob/master/examples/todomvc adapted for wry-launch
 use gloo::storage::{LocalStorage, Storage};
 use gloo::utils::window;
 use serde_derive::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ use yew::html::Scope;
 use yew::{Classes, Component, Context, Html, NodeRef, TargetCast, classes, html};
 
 pub fn main() {
-    wry_testing::run(|| async {
+    wry_launch::run(|| async {
         app();
         std::future::pending::<()>().await;
     })

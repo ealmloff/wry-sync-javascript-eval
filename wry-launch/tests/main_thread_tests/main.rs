@@ -71,7 +71,7 @@ async fn async_test_with_js_context<Fut: std::future::Future<Output = ()>, F: Fn
 }
 
 fn main() {
-    wry_testing::run_headless(|| async {
+    wry_launch::run_headless(|| async {
         // Adding numbers with and without batching
         test_with_js_context(add_number_js::test_add_number_js).await;
         test_with_js_context(add_number_js::test_add_number_js_batch).await;

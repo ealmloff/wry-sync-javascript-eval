@@ -13,7 +13,7 @@ use piet_web::WebRenderContext;
 const SAMPLE_PICTURE_NO: usize = 11;
 
 fn main() {
-    wry_testing::run(|| async {
+    wry_launch::run(|| async {
         window()
             .unwrap()
             .document()

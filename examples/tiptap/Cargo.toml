@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-web-sys = { version = "0.3.83", package = "web-sys", path = "../../wasm-bindgen/crates/web-sys", features = [
+web-sys = { version = "0.3", features = [
     "Document",
     "HtmlElement",
     "Element",
@@ -13,7 +13,7 @@ web-sys = { version = "0.3.83", package = "web-sys", path = "../../wasm-bindgen/
     "HtmlHeadElement",
     "DomTokenList",
 ] }
-wry-testing = { version = "0.1.0", path = "../.." }
+wry-launch = { version = "0.1.0", path = "../../wry-launch" }
 wasm-bindgen = { version = "0.2.106", package = "wasm-bindgen" }
 leptos-tiptap-build = "0.2.8"
 
