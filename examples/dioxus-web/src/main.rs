@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 use web_sys::window;
 
 fn main() {
-    wry_testing::run(|| async {
+    wry_launch::run(|| async {
         window()
             .unwrap()
             .document()

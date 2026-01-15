@@ -18,8 +18,7 @@ pub(crate) fn test_add_number_js_batch() {
         fn add_numbers(a: u32, b: u32) -> u32;
     }
 
-    let results =
-        wry_testing::batch(|| (0..100).map(|_| add_numbers(10, 15)).collect::<Vec<u32>>());
+    let results = wry_launch::batch(|| (0..100).map(|_| add_numbers(10, 15)).collect::<Vec<u32>>());
     for result in results {
         assert_eq!(result, 25);
     }

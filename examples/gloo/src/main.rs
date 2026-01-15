@@ -5,7 +5,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 
 pub fn main() {
-    wry_testing::run(|| async {
+    wry_launch::run(|| async {
         app();
         std::future::pending().await
     })

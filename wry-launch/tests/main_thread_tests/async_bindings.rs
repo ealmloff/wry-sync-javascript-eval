@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use futures_util::{StreamExt, stream::futures_unordered};
 use wasm_bindgen::wasm_bindgen;
-use wry_testing::JsValue;
+use wry_launch::JsValue;
 
 pub(crate) async fn test_call_async() {
     #[wasm_bindgen(inline_js = "export async function set_value_after_1_second(a, b) {

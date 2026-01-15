@@ -1,7 +1,7 @@
 //! Tests for thread locals
 
 use wasm_bindgen::{JsCast, wasm_bindgen};
-use wry_testing::JsValue;
+use wry_launch::JsValue;
 
 #[wasm_bindgen(inline_js = "export var CONST = 42;")]
 extern "C" {

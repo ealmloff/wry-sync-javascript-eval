@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "wry-testing",
+    "wry-launch",
     "wry-bindgen",
     "wry-bindgen-macro",
     "wry-bindgen-macro-support",

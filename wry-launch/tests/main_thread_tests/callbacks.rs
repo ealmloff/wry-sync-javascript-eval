@@ -1,7 +1,7 @@
 use futures_util::{StreamExt, stream::futures_unordered};
 use std::cell::Cell;
 use wasm_bindgen::{Closure, wasm_bindgen};
-use wry_testing::JsValue;
+use wry_launch::JsValue;
 
 pub(crate) fn test_call_callback() {
     #[wasm_bindgen(inline_js = "export function calls_callback(cb, value) { return cb(value); }")]

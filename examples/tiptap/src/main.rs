@@ -567,7 +567,7 @@ const EDITOR_HTML: &str = r#"
 "#;
 
 fn main() {
-    wry_testing::run(|| async {
+    wry_launch::run(|| async {
         let document = window().unwrap().document().unwrap();
         let body = document.body().unwrap();
 

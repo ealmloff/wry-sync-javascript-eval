@@ -1,5 +1,4 @@
 use tao::{
-    dpi::LogicalSize,
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
@@ -10,7 +9,7 @@ use wasm_bindgen::{runtime::WryBindgenEvent, wry::WryBindgen};
 
 use crate::home::root_response;
 
-/// Event type for the wry-testing event loop.
+/// Event type for the wry-launch event loop.
 /// Wraps wry-bindgen's AppEvent and adds application-level events.
 #[derive(Debug)]
 pub(crate) enum WryEvent {
@@ -32,17 +31,16 @@ pub const BASE_URL: &str = "wry://index.html";
 
 const PROTOCOL_SCHEME: &str = "wry";
 
-pub(crate) fn run_event_loop<F: Future<Output = ()> + 'static>(
+pub(crate) fn run_event_loop<F>(
     event_loop: EventLoop<WryEvent>,
     wry_bindgen: WryBindgen,
     app: impl FnOnce() -> F + Send + 'static,
-    headless: bool,
-) {
-    let window = WindowBuilder::new()
-        .with_inner_size(LogicalSize::new(800, 800))
-        .with_visible(!headless)
-        .build(&event_loop)
-        .unwrap();
+    window_builder: WindowBuilder,
+    webview_builder: WebViewBuilder<'static>,
+) where
+    F: Future<Output = ()> + 'static,
+{
+    let window = window_builder.build(&event_loop).unwrap();
 
     let proxy = event_loop.create_proxy();
     let proxy_clone = proxy.clone();
@@ -50,8 +48,8 @@ pub(crate) fn run_event_loop<F: Future<Output = ()> + 'static>(
     let app_builder = wry_bindgen.app_builder();
     let protocol_handler = app_builder.protocol_handler();
 
-    let builder = WebViewBuilder::new()
-        .with_devtools(true)
+    // Add the required protocol handler and URL to the user-provided webview builder
+    let builder = webview_builder
         .with_asynchronous_custom_protocol(PROTOCOL_SCHEME.into(), move |_, request, responder| {
             let responder = |response| responder.respond(response);
             let send_app_event = |event| {
